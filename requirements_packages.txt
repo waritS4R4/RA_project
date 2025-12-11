@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+scikit-learn
+plotly
+gurobipy
+vpp_ward
+control
+pvlib
+
