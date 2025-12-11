@@ -6,3 +6,5 @@ The main files are
 3. Batch_run.ipynb (this file allows user to run both stages and loop stage 2 over 21 hours)
 
 All other files are either example inputs (similarly to fed-in forecasts) and files created from the code to save results. 
+
+The required packages are listed in the requirements_packages.txt
