@@ -110,3 +110,4 @@ Pdis_min,  Pdis_max   = 0, Pbat_max # battery discharge
 interval = 5  # control interval in minutes
 horizon = 4  # prediction horizon in hours
 STEP = int(horizon * 60 / interval)  # number of steps in the horizon
+step = int( 60 / interval)

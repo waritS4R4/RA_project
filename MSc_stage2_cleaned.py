@@ -53,6 +53,7 @@ def initialise(h):
     for k in range(len(ghi_5min_forecast)):
         T_cell[k] = ff.cell_temperature(temp_5min_forecast[k], ghi_5min_forecast[k], cf.T_NOCT, cf.G_NOCT)  # Cell temperature
         P_solar_5min_forecast[k] = ff.pv_output(cf.ETA_INVT, cf.P_STC, ghi_5min_forecast[k], cf.G_STC, cf.GAMMA, T_cell[k], cf.T_STC)
+    
     P_solar_5min_forecast = P_solar_5min_forecast[i:i+cf.STEP]
 
     # 5 minutes wind generation forecast
@@ -85,7 +86,7 @@ def initialise(h):
     j = int(60/cf.interval)
     hourly_forecast = {
         "hour": np.repeat(h,j),
-        "interval": list(range(h*j, h*j+j)),
+        "interval": np.array(range(h*j, h*j+j)),
         "P_solar_forecast": P_solar_5min_forecast[:j],
         "P_wind_forecast": P_wind_5min_forecast[:j],
         "Heat_demand_forecast": heat_demand_5min_forecast[:j],
@@ -516,7 +517,7 @@ def main():
         N = int(60 / cf.interval)
         sol_hour = {
             "hour": np.repeat(mf.CURRENT_HOUR,int(60/cf.interval)),
-            "interval": list(range(mf.CURRENT_HOUR*int(60/cf.interval), mf.CURRENT_HOUR*int(60/cf.interval)+int(60/cf.interval))),
+            "interval": np.array(range(mf.CURRENT_HOUR*int(60/cf.interval), mf.CURRENT_HOUR*int(60/cf.interval)+int(60/cf.interval))),
             "Pimp":  sol["Pimp"][:N],
             "Pexp":  sol["Pexp"][:N],
             "H":     sol["H"][:N],
@@ -580,44 +581,43 @@ def main():
     
     # data frame for 12 rows in 1 hour
     df_hour = pd.DataFrame(sol_hour)
-    df_hour["hour"] = mf.CURRENT_HOUR
-    df_hour["interval"] = range(N)
-    df_hour["t_global"] = mf.CURRENT_HOUR * N + df_hour["interval"]
+    # df_hour["hour"] = mf.CURRENT_HOUR
+    # df_hour["interval"] = range(N)
+    # df_hour["t_global"] = mf.CURRENT_HOUR * N + df_hour["interval"]
 
     # -- Convert first 12 steps of results into flat format --
     flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
     row_df = pd.DataFrame([final_states]).iloc[0]
     
     # -------------------- Initialise CSV files if file doesnt exist --------------------
-    # Final states CSV (one row per hour)
+    # Final states CSV (one row per hour) this stores system states
     if not os.path.isfile(csv_path):
         df = pd.DataFrame(None, index=range(cf.HOURS), columns=final_states.keys())
         df.to_csv(csv_path, index=False)
     else:
         df = pd.read_csv(csv_path)
+    
     # Final states
     df.loc[mf.CURRENT_HOUR] = row_df
     df.to_csv(csv_path, index=False)
     
-    # Control actions CSV (multiple rows: 12 rows per hour)
+    # Control actions CSV (multiple rows: 12 rows per hour), this store control inputs
     if not os.path.isfile(csv_path_con):
-        # Write header on first creation
+        #if file doesnt exist create new csv
         df_hour.to_csv(csv_path_con, index=False)
     else:
         # Load existing file
         df_con = pd.read_csv(csv_path_con)
 
-    # Remove any old rows for this hour
-    df_con = df_con[df_con["hour"] != mf.CURRENT_HOUR]
+        # Remove any old rows for this hour
+        df_con = df_con[df_con["hour"] != mf.CURRENT_HOUR]
 
-    # Append the NEW 12 rows
-    df_con = pd.concat([df_con, df_hour], ignore_index=True)
+        # Append the NEW 12 rows
+        df_con = pd.concat([df_con, df_hour], ignore_index=True)
 
-    # Save back
-    df_con.to_csv(csv_path_con, index=False)
+        # Save back
+        df_con.to_csv(csv_path_con, index=False)
 
-
-    
 
 #%% Supply and demand 
 def plot():
@@ -902,70 +902,240 @@ def iterate():
 #         plt.xlim(0, xmax)
 
 
-def plot_results(
-    name="stage2_hourly_results.csv",
-    hours=None,
-    plots="all",
-    xlim=None
-):
-    """
-    Plot Stage-2 MPC results using the same style as MSc_stage1_cleaned,
-    with adjustable x-axis and merged hours.
+# def plot_results(
+#     name="stage2_hourly_results.csv",
+#     hours=None,
+#     plots="all",
+#     xlim=None
+# ):
+#     """
+#     Plot Stage-2 MPC results using the same style as MSc_stage1_cleaned,
+#     with adjustable x-axis and merged hours.
 
-    Parameters
-    ----------
-    name : str
-        CSV file storing 5-min MPC results.
-    hours : list[int]
-        Which HOURS to include (e.g., [12], [10,11,12]).
-    plots : list[str] or "all"
-        Which plot groups to show.
-    xlim : tuple or list (xmin, xmax)
-        Optional x-axis range in 5-min steps.
+#     Parameters
+#     ----------
+#     name : str
+#         CSV file storing 5-min MPC results.
+#     hours : list[int]
+#         Which HOURS to include (e.g., [12], [10,11,12]).
+#     plots : list[str] or "all"
+#         Which plot groups to show.
+#     xlim : tuple or list (xmin, xmax)
+#         Optional x-axis range in 5-min steps.
+#     """
+
+#     # --------------------------
+#     # Load Stage-2 data (5-min)
+#     # --------------------------
+#     df = pd.read_csv(name)
+#     N = int(60 / cf.interval)   # intervals per hour
+
+#     # Standard hour handling
+#     if hours is None:
+#         hours = [mf.CURRENT_HOUR]
+#     if isinstance(hours, int):
+#         hours = [hours]
+#     hours = [h for h in hours if 0 <= h < cf.HOURS]
+
+#     # Build 5-min interval index for all requested hours
+#     interval_idx = []
+#     for h in hours:
+#         interval_idx.extend(range(h * N, h * N + N))
+
+#     # Select these rows
+#     df_sel = df[df["interval"].isin(interval_idx)].reset_index(drop=True)
+
+#     # Build time vector for continuous plots
+#     t = np.arange(len(df_sel))
+
+#     # --------------------------
+#     # Load the FORECAST data
+#     # --------------------------
+#     df_f = pd.read_csv("hour_forecasts.csv")
+#     df_f = df_f[df_f["interval"].isin(interval_idx)].reset_index(drop=True)
+
+#     if len(df_f) == 0:
+#         print("⚠️ Forecast rows missing for hours:", hours)
+#         return
+
+#     solar = df_f["P_solar_forecast"].to_numpy()
+#     wind  = df_f["P_wind_forecast"].to_numpy()
+#     L_IWf = df_f["L_IW_forecast"].to_numpy()
+#     L_DCf = df_f["L_DC_forecast"].to_numpy()
+
+#     # --------------------------
+#     # Extract solved MPC outputs
+#     # --------------------------
+#     Pimp = df_sel["Pimp"].to_numpy()
+#     Pexp = df_sel["Pexp"].to_numpy()
+#     H    = df_sel["H"].to_numpy()
+#     SoC  = df_sel["SoC"].to_numpy()
+
+#     LBW1 = df_sel["L_BW1"].to_numpy()
+#     LBW2 = df_sel["L_BW2"].to_numpy()
+#     A_DC = df_sel["A_DC"].to_numpy()
+
+#     Pch  = df_sel["Pch"].to_numpy()
+#     Pdis = df_sel["Pdis"].to_numpy()
+#     cool = df_sel["P_cooling"].to_numpy()*1e-3
+
+#     # Combined loads
+#     L_total = LBW1 + LBW2 + L_IWf
+
+#     # --------------------------
+#     # DEFINE PLOT SET
+#     # --------------------------
+#     if isinstance(plots, str):
+#         if plots == "all":
+#             plots = [
+#                 "supply",
+#                 "supply_demand",
+#                 "grid",
+#                 "heat",
+#                 "battery",
+#                 "soc",
+#                 "workload",
+#                 "servers"
+#             ]
+#         else:
+#             plots = [plots]
+
+#     # --------------------------
+#     # 1️⃣ SUPPLY PLOT (solar + wind + cooling load + grid)
+#     # --------------------------
+#     if "supply" in plots:
+#         ff.plot_timeseries_multi(
+#             t,
+#             [solar, wind, cool],
+#             labels=["Solar forecast", "Wind forecast", "Cooling power (kW)"],
+#             title="Supply Components (5-min resolution)",
+#             ylabel="kW",
+#             xlabel="5-min intervals"
+#         )
+
+#     # --------------------------
+#     # 2️⃣ SUPPLY vs DEMAND PLOT
+#     # --------------------------
+#     if "supply_demand" in plots:
+#         ff.plot_timeseries_multi(
+#             t,
+#             [solar + wind, L_total],
+#             labels=["Renewable supply (solar+wind)", "Total demand"],
+#             title="Supply vs Total Demand",
+#             ylabel="kW",
+#             xlabel="5-min intervals"
+#         )
+
+#     # --------------------------
+#     # 3️⃣ GRID IMPORT/EXPORT
+#     # --------------------------
+#     if "grid" in plots:
+#         ff.plot_timeseries_multi(
+#             t,
+#             [Pimp, Pexp],
+#             labels=["Grid import", "Grid export"],
+#             title="Grid Transfer",
+#             ylabel="kW",
+#             xlabel="5-min intervals"
+#         )
+
+#     # --------------------------
+#     # 4️⃣ HEAT RECOVERY
+#     # --------------------------
+#     if "heat" in plots:
+#         ff.plot_timeseries_multi(
+#             t, [H],
+#             labels=["Recovered heat"],
+#             title="Recovered Heat (H)",
+#             ylabel="W",
+#             xlabel="5-min intervals"
+#         )
+
+#     # --------------------------
+#     # 5️⃣ BATTERY POWER
+#     # --------------------------
+#     if "battery" in plots:
+#         ff.plot_timeseries_multi(
+#             t,
+#             [Pch, -Pdis],
+#             labels=["Battery charging (+)", "Battery discharging (–)"],
+#             title="Battery Operation",
+#             ylabel="kW",
+#             xlabel="5-min intervals"
+#         )
+
+#     # --------------------------
+#     # 6️⃣ STATE OF CHARGE
+#     # --------------------------
+#     if "soc" in plots:
+#         ff.plot_timeseries_multi(
+#             t, [SoC],
+#             labels=["SoC"],
+#             title="Battery SoC",
+#             ylabel="State of Charge",
+#             xlabel="5-min intervals"
+
+#         )
+
+#     # --------------------------
+#     # 7️⃣ WORKLOAD PLOTS
+#     # --------------------------
+#     if "workload" in plots:
+#         ff.plot_timeseries_multi(
+#             t,
+#             [LBW1, LBW2, L_IWf],
+#             labels=["Batch Z1", "Batch Z2", "Interactive forecast"],
+#             title="Workload Breakdown",
+#             ylabel="Requests / 5-min",
+#             xlabel="Time"
+#         )
+
+#     # --------------------------
+#     # 8️⃣ SERVERS ACTIVE
+#     # --------------------------
+#     if "servers" in plots:
+#         ff.plot_timeseries_multi(
+#             t, [A_DC],
+#             labels=["Active servers"],
+#             title="Active Server Count",
+#             ylabel="Servers",
+#             xlabel="5-min intervals"
+#         )
+
+#     print("✔ Plotting complete for hours:", hours)
+
+def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
+    """
+    Stage-2 plotting function using ff.plot_timeseries_multi for all figures.
+    Automatically adjusts x-axis depending on how many hours are selected.
     """
 
-    # --------------------------
-    # Load Stage-2 data (5-min)
-    # --------------------------
     df = pd.read_csv(name)
-    N = int(60 / cf.interval)   # intervals per hour
+    N = int(60 / cf.interval)   # 12 per hour
 
-    # Standard hour handling
+    # ----------------------------
+    # HOURS → INTERVAL INDEX
+    # ----------------------------
     if hours is None:
         hours = [mf.CURRENT_HOUR]
+
     if isinstance(hours, int):
         hours = [hours]
-    hours = [h for h in hours if 0 <= h < cf.HOURS]
 
-    # Build 5-min interval index for all requested hours
-    interval_idx = []
+    hours = sorted(hours)
+
+    intervals = []
     for h in hours:
-        interval_idx.extend(range(h * N, h * N + N))
+        intervals.extend(range(h*N, h*N + N))
 
-    # Select these rows
-    df_sel = df[df["interval"].isin(interval_idx)].reset_index(drop=True)
+    df_sel = df[df["interval"].isin(intervals)].reset_index(drop=True)
 
-    # Build time vector for continuous plots
+    # TIME AXIS (auto-size)
     t = np.arange(len(df_sel))
 
-    # --------------------------
-    # Load the FORECAST data
-    # --------------------------
-    df_f = pd.read_csv("hour_forecasts.csv")
-    df_f = df_f[df_f["interval"].isin(interval_idx)].reset_index(drop=True)
-
-    if len(df_f) == 0:
-        print("⚠️ Forecast rows missing for hours:", hours)
-        return
-
-    solar = df_f["P_solar_forecast"].to_numpy()
-    wind  = df_f["P_wind_forecast"].to_numpy()
-    L_IWf = df_f["L_IW_forecast"].to_numpy()
-    L_DCf = df_f["L_DC_forecast"].to_numpy()
-
-    # --------------------------
-    # Extract solved MPC outputs
-    # --------------------------
+    # ----------------------------
+    # EXTRACT VARIABLES
+    # ----------------------------
     Pimp = df_sel["Pimp"].to_numpy()
     Pexp = df_sel["Pexp"].to_numpy()
     H    = df_sel["H"].to_numpy()
@@ -977,136 +1147,237 @@ def plot_results(
 
     Pch  = df_sel["Pch"].to_numpy()
     Pdis = df_sel["Pdis"].to_numpy()
-    cool = df_sel["P_cooling"].to_numpy()*1e-3
+    cool = df_sel["P_cooling"].to_numpy()
 
-    # Combined loads
-    L_total = LBW1 + LBW2 + L_IWf
+    TRCU = df_sel["TRCU"].to_numpy()
+    QRCU = df_sel["QRCU"].to_numpy()
+    PS1  = df_sel["PS1"].to_numpy()
+    PS2  = df_sel["PS2"].to_numpy()
 
-    # --------------------------
-    # DEFINE PLOT SET
-    # --------------------------
+    Ti1 = df_sel["Ti1"].to_numpy()
+    Ti2 = df_sel["Ti2"].to_numpy()
+    To1 = df_sel["To1"].to_numpy()
+    To2 = df_sel["To2"].to_numpy()
+
+    # ----------------------------
+    # FORECASTS
+    # ----------------------------
+    df_f = pd.read_csv("hour_forecasts.csv")
+    df_f = df_f[df_f["interval"].isin(intervals)].reset_index(drop=True)
+
+    solar = df_f["P_solar_forecast"].to_numpy()
+    wind  = df_f["P_wind_forecast"].to_numpy()
+    L_IWf = df_f["L_IW_forecast"].to_numpy()
+
+    # ----------------------------
+    # RESOLVE PLOT LIST
+    # ----------------------------
     if isinstance(plots, str):
         if plots == "all":
             plots = [
-                "supply",
-                "supply_demand",
-                "grid",
-                "heat",
-                "battery",
-                "soc",
-                "workload",
-                "servers"
+                "supply", "demand_stack", "supply_demand",
+                "grid", "battery", "soc",
+                "cooling", "temps", "servers"
             ]
         else:
             plots = [plots]
 
-    # --------------------------
-    # 1️⃣ SUPPLY PLOT (solar + wind + cooling load + grid)
-    # --------------------------
+    # ============================================================
+    # 1. SUPPLY (solar + wind + battery discharge)
+    # ============================================================
     if "supply" in plots:
         ff.plot_timeseries_multi(
             t,
-            [solar, wind, cool],
-            labels=["Solar forecast", "Wind forecast", "Cooling power (kW)"],
-            title="Supply Components (5-min resolution)",
+            [solar, wind, Pdis],
+            ["Solar", "Wind", "Battery Discharge"],
+            title="Available Supply (5-min resolution)",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 2️⃣ SUPPLY vs DEMAND PLOT
-    # --------------------------
-    if "supply_demand" in plots:
+    # ============================================================
+    # 2. DEMAND STACK (IW + BW + cooling)
+    # ============================================================
+    if "demand_stack" in plots:
+        total_cool_kW = cool * 1e-3
         ff.plot_timeseries_multi(
             t,
-            [solar + wind, L_total],
-            labels=["Renewable supply (solar+wind)", "Total demand"],
-            title="Supply vs Total Demand",
+            [L_IWf, LBW1, LBW2, total_cool_kW],
+            ["Interactive", "BW Zone 1", "BW Zone 2", "Cooling"],
+            title="Demand Breakdown (stacked)",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps",
+            stacked=True
         )
 
-    # --------------------------
-    # 3️⃣ GRID IMPORT/EXPORT
-    # --------------------------
+    # ============================================================
+    # 3. SUPPLY VS DEMAND
+    # ============================================================
+    if "supply_demand" in plots:
+        total_supply = solar + wind + Pdis
+        total_demand = L_IWf + LBW1 + LBW2 + cool*1e-3
+        ff.plot_timeseries_multi(
+            t,
+            [total_supply, total_demand],
+            ["Total Supply", "Total Demand"],
+            title="Supply vs Demand",
+            ylabel="kW",
+            xlabel="5-min steps"
+        )
+
+    # ============================================================
+    # 4. GRID IMPORT / EXPORT
+    # ============================================================
     if "grid" in plots:
         ff.plot_timeseries_multi(
             t,
             [Pimp, Pexp],
-            labels=["Grid import", "Grid export"],
-            title="Grid Transfer",
+            ["Import", "Export"],
+            title="Grid Import / Export",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 4️⃣ HEAT RECOVERY
-    # --------------------------
-    if "heat" in plots:
-        ff.plot_timeseries_multi(
-            t, [H],
-            labels=["Recovered heat"],
-            title="Recovered Heat (H)",
-            ylabel="W",
-            xlabel="5-min intervals",
-            xlim=xlim
-        )
-
-    # --------------------------
-    # 5️⃣ BATTERY POWER
-    # --------------------------
+    # ============================================================
+    # 5. BATTERY POWER FLOW
+    # ============================================================
     if "battery" in plots:
         ff.plot_timeseries_multi(
             t,
-            [Pch, -Pdis],
-            labels=["Battery charging (+)", "Battery discharging (–)"],
-            title="Battery Operation",
+            [Pch, Pdis],
+            ["Charge", "Discharge"],
+            title="Battery Power Flow",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 6️⃣ STATE OF CHARGE
-    # --------------------------
+    # ============================================================
+    # 6. BATTERY STATE OF CHARGE
+    # ============================================================
     if "soc" in plots:
         ff.plot_timeseries_multi(
-            t, [SoC],
-            labels=["SoC"],
-            title="Battery SoC",
-            ylabel="State of Charge",
-            xlabel="5-min intervals",
-            xlim=xlim
+            t,
+            [SoC],
+            ["SoC"],
+            title="Battery State of Charge",
+            ylabel="SoC",
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 7️⃣ WORKLOAD PLOTS
-    # --------------------------
-    if "workload" in plots:
+    # ============================================================
+    # 7. COOLING POWER (kW)
+    # ============================================================
+    if "cooling" in plots:
         ff.plot_timeseries_multi(
             t,
-            [LBW1, LBW2, L_IWf],
-            labels=["Batch Z1", "Batch Z2", "Interactive forecast"],
-            title="Workload Breakdown",
-            ylabel="Requests / 5-min",
-            xlabel="Time",
-            xlim=xlim
+            [cool * 1e-3],
+            ["Cooling Power"],
+            title="Cooling Power",
+            ylabel="kW",
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 8️⃣ SERVERS ACTIVE
-    # --------------------------
+    # ============================================================
+    # 8. TEMPERATURES
+    # ============================================================
+    if "temps" in plots:
+        ff.plot_timeseries_multi(
+            t,
+            [Ti1, Ti2, To1, To2],
+            ["Ti1", "Ti2", "To1", "To2"],
+            title="Rack Temperatures",
+            ylabel="°C",
+            xlabel="5-min steps"
+        )
+
+    # ============================================================
+    # 9. SERVER POWER
+    # ============================================================
     if "servers" in plots:
         ff.plot_timeseries_multi(
-            t, [A_DC],
-            labels=["Active servers"],
-            title="Active Server Count",
-            ylabel="Servers",
-            xlabel="5-min intervals",
-            xlim=xlim
+            t,
+            [PS1, PS2],
+            ["Server Zone 1", "Server Zone 2"],
+            title="Server Power",
+            ylabel="W",
+            xlabel="5-min steps"
         )
 
-    print("✔ Plotting complete for hours:", hours)
+    # ============================================================
+    # 11. ACCUMULATED BATCH WORKLOAD (BW1 + BW2)
+    # ============================================================
+    if "accum_bw" in plots:
+        bw1_acc = np.cumsum(LBW1)
+        bw2_acc = np.cumsum(LBW2)
+        bw_total_acc = bw1_acc + bw2_acc
+
+        ff.plot_timeseries_multi(
+            t,
+            [bw1_acc, bw2_acc, bw_total_acc],
+            ["Accum BW1", "Accum BW2", "Total Accum BW"],
+            title="Accumulated Batch Workload",
+            ylabel="Cumulative Requests",
+            xlabel="5-min steps"
+        )
+    
+    # ============================================================
+    # WORKLOAD STACK CHART (Stage-1 style, adapted for 5-min)
+    # ============================================================
+    if "workload_stack" in plots:
+
+        # --- Stage 2 uses 5-minute data instead of hourly data ---
+        IW = L_IWf                    # interactive workload (5-min)
+        BW1 = LBW1                    # batch workload zone 1 (5-min)
+        BW2 = LBW2                    # batch workload zone 2 (5-min)
+
+        BW_total = BW1 + BW2
+        total_load = IW + BW_total
+
+        t_steps = np.arange(len(IW))   # 5-min intervals across selected hours
+
+        plt.figure(figsize=(10, 4))
+
+        # -----------------------------
+        # STACKED BARS (same idea as stage 1)
+        # -----------------------------
+        plt.bar(t_steps, IW,
+                label="Interactive Load (IW)", alpha=0.8)
+
+        plt.bar(t_steps, BW1,
+                bottom=IW, label="Batch Zone 1 (BW1)", alpha=0.8)
+
+        plt.bar(t_steps, BW2,
+                bottom=IW + BW1, label="Batch Zone 2 (BW2)", alpha=0.8)
+
+        # -----------------------------
+        # OVERLAY LINES (same as stage 1)
+        # -----------------------------
+        plt.plot(t_steps, IW,
+                linestyle="--", linewidth=2, color="black",
+                label="IW (original line)")
+
+        # ORIGINAL batch workload reference (hourly)
+        # → repeat each hour’s BW_0 value 12 times to match 5-min resolution
+        if hasattr(mf, "L_BW_0"):
+            L_BW_orig_5min = np.repeat(mf.L_BW_0, N)[:len(IW)]
+            plt.plot(t_steps, L_BW_orig_5min,
+                    linestyle="-.", linewidth=2, color="red",
+                    label="BW original line")
+
+        plt.plot(t_steps, total_load,
+                linewidth=2, color="blue",
+                label="Total Load (IW + BW)")
+
+        # -----------------------------
+        # LABELS & DECORATION
+        # -----------------------------
+        hrs_str = f"{hours}" if isinstance(hours, list) else str(hours)
+        plt.title(f"Data Centre Load: Stack + Original Curves (Hours {hrs_str})")
+        plt.xlabel("5-minute intervals")
+        plt.ylabel("Requests per 5-min")
+        plt.grid(alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+

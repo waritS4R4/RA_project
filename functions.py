@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import constant_file as cf
 
+
+
 # Dynamic voltage and freqeucy scaling (DVFS) model for servers' CPU ref: Vasques et al. 2019
 def DVFS_model(C, N_sw, V_dd, f, c0, c1):
     """
@@ -36,9 +38,12 @@ def utilisation_model_regression(u):  #Beloglazov and Buyya 2010
     global P_IDLE, P_PEAK
     return (P_IDLE + (P_PEAK - P_IDLE) * u)*1e-3  # Convert W to kW
 
+
 def server_consumption(C_PUE, A, L, L_rate, P_IDLE, P_PEAK):  # Yang et al. 2023 this is per rack (divided by Active servers)
-    """
-    Server power consumption model considering PUE.
+                                                              # https://doi.org/10.1016/j.epsr.2023.109443
+    
+    """ 
+    erver power consumption model considering PUE.
     C_PUE = PUE coefficient
     A = number of active servers
     L = total number of arriving workload 
@@ -227,7 +232,7 @@ def plot_timeseries_multi(t, series_list, labels, title, xlabel="Time step", yla
     plt.show()
     
 # bar plot for multiple time series
-def plot_bar_multi(t, series_list, labels, title, xlabel="Time step", ylabel="Value", figsize=(8, 4)):
+def plot_bar_multi(t, series_list, labels, title,  xlabel="Time step", ylabel="Value", figsize=(8, 4)):
     x = np.arange(len(t))
     total_width = 0.8
     num_series = len(series_list)

@@ -24,14 +24,28 @@ def initialise(h):
     global p_buy_5min, p_gas_5min, p_sell_5min
     global optimal_schedule
 
-    # Load the optimal schedule based on the selected mode extracted from the 
-    if stg1.mode == 0:
-        optimal_schedule = pd.read_csv('schedule_single_objective.csv')
-    elif stg1.mode == 1:
-        optimal_schedule = pd.read_csv('schedule_multi_objective.csv')
+    if stg1.mode.isinstance:
+        # Load the optimal schedule based on the selected mode extracted from the 
+        if stg1.mode == 0:
+            optimal_schedule = pd.read_csv('schedule_single_objective.csv')
+        elif stg1.mode == 1:
+            optimal_schedule = pd.read_csv('schedule_multi_objective.csv')
+        else:
+            raise ValueError("Invalid mode selected.")
     else:
-        raise ValueError("Invalid mode selected.")
-    
+        user_choice = input("Select objective type:\n0 - Single objective\n1 - Multi-objective with heat tracking penalty\nEnter 0 or 1: ")
+        if user_choice == "0":
+            mode = 0  # Single objective
+            optimal_schedule = pd.read_csv('schedule_single_objective.csv')
+            print(f"Objective type selected: Single objective")
+        elif user_choice == "1":
+            mode = 1  # Multi-objective with heat tracking penalty
+            optimal_schedule = pd.read_csv('schedule_multi_objective.csv')
+            print(f"Objective type selected: Multi-objective")
+        else:
+            print("Invalid choice, defaulting to single objective.")
+            mode = 0
+            
     # import the hourly solar, wind and heat from stage 1
     df_gen = pd.read_csv('generation_and_heat_demand_data.csv')
     P_solar = df_gen['Solar_Power_kW'].values
@@ -40,13 +54,17 @@ def initialise(h):
 
     # inditify which hours to extract from optimal schedule
     i = h # this is the first our of the short period
+    
+    global start_5min, end_5min
+    start_5min = h*cf.step
+    end_5min = h*cf.step + cf.STEP #STEP is 48 while step is within 1 hour
 
     # 5 minutes solar generation forecast 
     P_solar_5min = np.repeat(P_solar[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
     # import 5 minute forecaste from solcast
     ghi_5min_forecast = pd.read_csv('ghi_5mins_1jan2022.csv')['ghi'].values
     temp_5min_forecast = pd.read_csv('ghi_5mins_1jan2022.csv')['air_temp'].values
-    
+
     # calculate solar output 5 minutes
     T_cell = np.zeros(len(ghi_5min_forecast))
     P_solar_5min_forecast = np.zeros(len(ghi_5min_forecast))

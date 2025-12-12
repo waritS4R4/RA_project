@@ -795,7 +795,6 @@ def main():
                                 sol["PS1"][hour],
                                 sol["PS2"][hour]])
     
-    # get user input if wants plots
 
 # to execute main function when run python script directly
 if __name__ == "__main__":
