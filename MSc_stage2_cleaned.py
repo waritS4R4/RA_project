@@ -54,7 +54,7 @@ def initialise(h):
         T_cell[k] = ff.cell_temperature(temp_5min_forecast[k], ghi_5min_forecast[k], cf.T_NOCT, cf.G_NOCT)  # Cell temperature
         P_solar_5min_forecast[k] = ff.pv_output(cf.ETA_INVT, cf.P_STC, ghi_5min_forecast[k], cf.G_STC, cf.GAMMA, T_cell[k], cf.T_STC)
     
-    P_solar_5min_forecast = P_solar_5min_forecast[i:i+cf.STEP]
+    P_solar_5min_forecast = P_solar_5min_forecast[h*12:h*12+cf.STEP]
 
     # 5 minutes wind generation forecast
     P_wind_5min = np.repeat(P_wind[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
