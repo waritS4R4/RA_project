@@ -781,7 +781,6 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
             title="Demand Breakdown (stacked)",
             ylabel="kW",
             xlabel="5-min steps",
-            stacked=True
         )
 
     # ============================================================
