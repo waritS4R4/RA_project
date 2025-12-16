@@ -1,0 +1,11 @@
+\ Model Upper_Layer_Optimisation_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0x64d302b18a69f095
+Minimize
+ 
+Subject To
+ initial_inputs_U_0[2]: U[2,0] = 0
+ PS1_1: U[2,0] - 1.333333333333333 L_BW[0,1] - 100.5 A_DC[0] = 200
+Bounds
+ U[2,0] free
+End

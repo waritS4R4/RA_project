@@ -219,10 +219,6 @@ def main():
     # read final values from the stored csv file
     # import the previous period final states as initial conditions
 
-    # -array for storing final states extracted from csv files
-    Ti = np.zeros(cf.NUMBER_OF_SERVERS)
-    To = np.zeros(cf.NUMBER_OF_SERVERS)
-
     # check is the current hour is the initial hour
     if mf.CURRENT_HOUR == 0:
         TI_0 = np.full(2, cf.TI_10)   # initial inlet temp for all servers
@@ -236,14 +232,30 @@ def main():
 
         # reassign SoC value
         SoC_0 = cf.SoC_0
-
+    
     # if not the first hour
     elif mf.CURRENT_HOUR > 0:
-        final_states = pd.read_csv('states.csv')
-        X0 = np.zeros(2*cf.NUMBER_OF_SERVERS) #number of zones is 2
-        for i in range (cf.NUMBER_OF_SERVERS):
-            X0[i] = Ti[i]
-            X0[i+cf.NUMBER_OF_SERVERS] = To[i]
+        # final_states = pd.read_csv('states.csv')
+        # X0 = np.zeros(2*cf.NUMBER_OF_SERVERS) #number of zones is 2
+
+        # # for i in range (cf.NUMBER_OF_SERVERS):
+        # #     X0[i] = Ti[i]
+        # #     X0[i+cf.NUMBER_OF_SERVERS] = To[i]
+
+        final_states = pd.read_csv("states.csv")
+        h_prev = mf.CURRENT_HOUR - 1
+
+        Ti_prev = np.array([
+            final_states.iloc[h_prev][f"Ti_{i}"]
+            for i in range(cf.NUMBER_OF_SERVERS)
+        ], dtype=float)
+
+        To_prev = np.array([
+            final_states.iloc[h_prev][f"To_{i}"]
+            for i in range(cf.NUMBER_OF_SERVERS)
+        ], dtype=float)
+
+        X0 = np.concatenate([Ti_prev, To_prev])
 
         TRCU_0_arr = final_states["TRCU_final"][mf.CURRENT_HOUR-1]
         QRCU_0_arr = final_states["QRCU_final"][mf.CURRENT_HOUR-1]
@@ -255,6 +267,8 @@ def main():
         SoC_0 = final_states["SoC_final"][mf.CURRENT_HOUR-1]
 
         U0 = np.array([TRCU_0_arr, QRCU_0_arr, PS1_0_arr, PS2_0_arr])
+    
+    
 
     # %%
     # Decision vars
@@ -327,6 +341,7 @@ def main():
         #     total_L_BW = quicksum(L_BW[j,t-1] for j in range(NUMBER_OF_SERVERS)) # total BW that is schedule before time t
         #     m.addConstr(quicksum(L_BW[j, t] for j in range(NUMBER_OF_SERVERS)) <= quicksum(L_BW_0_5min_forecast[t] for t in range(0,t)) - total_L_BW, name=f"eq_3d_L_{t}") # batch worklaod that is schedule must be smaller than sum of incoming btach workload - already schedule worklaod
 
+        # initialise cumulative arrivals and scheduled workload for the day
         cum_arrival = 0
         cum_scheduled = 0
 
@@ -373,6 +388,14 @@ def main():
                 avg_TRCU == U[1, t], name=f"avg_TRCU_{t}"
             )
 
+            # SoC update constraint
+            m.addConstr(
+                SoC[t] == (1-cf.ETA_LOSS)*SoC[t-1]
+                    + cf.ETA_CH * Pch[t] * 1e3 * cf.interval*60/cf.E_ESS
+                    - (1/cf.ETA_DCH) * Pdis[t] * 1e3 * cf.interval*60/cf.E_ESS,
+                name=f"SoC_{t}"
+            )
+
             # average tmeperature outlet of the two zones
             avg_TO = (X_1[2, t] + X_1[3, t]) / 2
 
@@ -397,10 +420,10 @@ def main():
         M = cf.Pbat_max
 
         # Power and heat balance constraints
-        for t in range(1,cf.STEP):
+        for t in range(0,cf.STEP):
 
             # Power balance constraint
-            Pdc_expr = ff.server_consumption(1.5, A_DC[t], L[t], 2000, cf.P_IDLE, cf.P_PEAK)
+            Pdc_expr = ff.server_consumption(1.5, A_DC[t], L[t], cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
             m.addConstr(
                 Pimp[t] - Pexp[t] +  Pdis[t] - Pch[t] + P_solar_5min_forecast[t] - P_cooling[t]*1e-3 - Pdc_expr == 0,
                 name=f"power_balance_{t}"
@@ -409,26 +432,18 @@ def main():
             m.addConstr(Pdis[t] <= M * epsilon_dis[t], name=f"discharge_power_limit_{t}")
             m.addConstr(Pch[t]  <= M * epsilon_ch[t], name=f"charge_power_limit_{t}")
             m.addConstr(epsilon_dis[t] + epsilon_ch[t] <= 1, name=f"battery_state_{t}")
-
-            # SoC update constraint
-            m.addConstr(
-                SoC[t] == (1-cf.ETA_LOSS)*SoC[t-1]
-                    + cf.ETA_CH * Pch[t] * 1e3 * cf.interval*60/cf.E_ESS
-                    - (1/cf.ETA_DCH) * Pdis[t] * 1e3 * cf.interval*60/cf.E_ESS,
-                name=f"SoC_{t}"
-            )
             
             # Heat balance
             m.addConstr(H_sub[t] == heat_demand_5min_forecast[t]*1e3 - H_1[t], name=f"heat_balance_{t}")
 
         # assess the deviation from optimal schedule
-        dev_Pimp = P_imp_opt - Pimp
-        dev_Pexp = P_exp_opt - Pexp # deiate from the optimal power transfer
-        dev_SoC =  SoC_opt - SoC  # deviate from the optimal charging 
+        # dev_Pimp = P_imp_opt - Pimp
+        # dev_Pexp = P_exp_opt - Pexp # deiate from the optimal power transfer
+        # dev_SoC =  SoC_opt - SoC  # deviate from the optimal charging 
 
-        # bathcworkload deviation 
-        dev_LBW1 = L_BW[0,:] - LBW1_opt
-        dev_LBW2 = L_BW[1,:] - LBW2_opt
+        # # bathcworkload deviation 
+        # dev_LBW1 = L_BW[0,:] - LBW1_opt
+        # dev_LBW2 = L_BW[1,:] - LBW2_opt
 
         # dev_LBW2 = np.zeros(cf.STEP)
         # for t in range(cf.STEP):
@@ -540,7 +555,6 @@ def main():
             "To2":  sol["To"][1, :N],
             }
         
-
     for i in range(1, cf.STEP):
         energy_cost = (cf.interval/60) * np.sum(p_buy_5min[i] * sol["Pimp"] - p_sell_5min[i] * sol["Pexp"] + p_gas_5min[i]*(heat_demand_5min[i] - sol["H"]*1e-3))
         heat_pen    = np.sum( (cf.interval/60) * p_gas_5min[i] * (heat_demand_5min_forecast[i] - sol["H"]*1e-3)**2)
@@ -559,20 +573,27 @@ def main():
         Multi_Energy_Cost = energy_cost
         Multi_Heat_Penalty = heat_pen
 
+    # -array for storing final states extracted from csv files
+    Ti = np.zeros(cf.NUMBER_OF_SERVERS)
+    To = np.zeros(cf.NUMBER_OF_SERVERS)
+
+    final_states = {}
     for i in range(cf.NUMBER_OF_SERVERS):
         Ti[i] = sol["Ti"][i,int(60/cf.interval)-1]
         To[i] = sol["To"][i,int(60/cf.interval)-1]
 
-        # export the final states for the next optimisation horizon
-    final_states = {
-        "Ti_final": Ti,
-        "To_final": To,
+    if mf.CURRENT_HOUR >= 0:
+        for i in range(cf.NUMBER_OF_SERVERS):
+            final_states[f"Ti_{i}"] = Ti[i]
+            final_states[f"To_{i}"] = To[i]
+
+    final_states.update({
         "SoC_final": sol["SoC"][int(60/cf.interval)-1],
         "TRCU_final": sol["TRCU"][int(60/cf.interval)-1],
         "QRCU_final": sol["QRCU"][int(60/cf.interval)-1],
         "PS1_final": sol["PS1"][int(60/cf.interval)-1],
         "PS2_final": sol["PS2"][int(60/cf.interval)-1],
-    }
+    })
 
     csv_path = "states.csv"
     csv_path_con = "stage2_hourly_results.csv"  # to store control actions
@@ -581,9 +602,6 @@ def main():
     
     # data frame for 12 rows in 1 hour
     df_hour = pd.DataFrame(sol_hour)
-    # df_hour["hour"] = mf.CURRENT_HOUR
-    # df_hour["interval"] = range(N)
-    # df_hour["t_global"] = mf.CURRENT_HOUR * N + df_hour["interval"]
 
     # -- Convert first 12 steps of results into flat format --
     flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
@@ -751,7 +769,7 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
             plots = [
                 "supply", "demand_stack", "supply_demand",
                 "grid", "battery", "soc",
-                "cooling", "temps", "servers"
+                "cooling", "temps", "servers", "workload_stack", "accum_bw"
             ]
         else:
             plots = [plots]
@@ -780,7 +798,7 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
             ["Interactive", "BW Zone 1", "BW Zone 2", "Cooling"],
             title="Demand Breakdown (stacked)",
             ylabel="kW",
-            xlabel="5-min steps",
+            xlabel="5-min steps"
         )
 
     # ============================================================

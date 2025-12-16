@@ -34,6 +34,7 @@ K = RHO_A * CP_A
 TRCU_0 = 25          # Initial THPCU airflow temperature
 QRCU_0 = 0.1 / 2     # Initial airflow (QHPCU) 
 COP_C = 3.5      # Cooling system coefficient of performance
+COP_HP = 3      # Heating COP
 
 # Initial server temperature conditions
 TI_10 = 20;  TI_20 = TI_10      # intial inlet temperature
