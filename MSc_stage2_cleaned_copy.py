@@ -71,7 +71,8 @@ def initialise(h):
     for k in range(len(ghi_5min_forecast)):
         T_cell[k] = ff.cell_temperature(temp_5min_forecast[k], ghi_5min_forecast[k], cf.T_NOCT, cf.G_NOCT)  # Cell temperature
         P_solar_5min_forecast[k] = ff.pv_output(cf.ETA_INVT, cf.P_STC, ghi_5min_forecast[k], cf.G_STC, cf.GAMMA, T_cell[k], cf.T_STC)
-    P_solar_5min_forecast = P_solar_5min_forecast[i:i+cf.STEP]
+    
+    P_solar_5min_forecast = P_solar_5min_forecast[h*12:h*12+cf.STEP]
 
     # 5 minutes wind generation forecast
     P_wind_5min = np.repeat(P_wind[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
@@ -95,15 +96,20 @@ def initialise(h):
     L_BW_0_5min_forecast = (L_DC_5min_forecast - L_IW_5min_forecast) # exact batch workload at each time step
 
     # electricity and gas prices
-    p_buy_5min = np.repeat(stg1.p_buy, 12)
-    p_sell_5min = np.repeat(stg1.p_sell, 12)
-    p_gas_5min = np.repeat(stg1.p_gas, 12)
+    price_data = pd.read_csv('prices_data.csv')
+    p_buy  = price_data['elec_price'].values
+    p_sell = price_data['elec_price_sell'].values
+    p_gas  = price_data['gas_price'].values
+
+    p_buy_5min = np.repeat(p_buy, 12)
+    p_sell_5min = np.repeat(p_sell, 12)
+    p_gas_5min = np.repeat(p_gas, 12)
 
     #save the first hourly forecast to csv so that i can be used later in the results plots
     j = int(60/cf.interval)
     hourly_forecast = {
         "hour": np.repeat(h,j),
-        "interval": list(range(h*j, h*j+j)),
+        "interval": np.array(range(h*j, h*j+j)),
         "P_solar_forecast": P_solar_5min_forecast[:j],
         "P_wind_forecast": P_wind_5min_forecast[:j],
         "Heat_demand_forecast": heat_demand_5min_forecast[:j],
@@ -236,9 +242,9 @@ def main():
     # read final values from the stored csv file
     # import the previous period final states as initial conditions
 
-    # -array for storing final states extracted from csv files
-    Ti = np.zeros(cf.NUMBER_OF_SERVERS)
-    To = np.zeros(cf.NUMBER_OF_SERVERS)
+    # # -array for storing final states extracted from csv files
+    # Ti = np.zeros(cf.NUMBER_OF_SERVERS)
+    # To = np.zeros(cf.NUMBER_OF_SERVERS)
 
     # check is the current hour is the initial hour
     if mf.CURRENT_HOUR == 0:
@@ -257,17 +263,21 @@ def main():
     # if not the first hour
     elif mf.CURRENT_HOUR > 0:
         final_states = pd.read_csv('states.csv')
-        X0 = np.zeros(2*cf.NUMBER_OF_SERVERS) #number of zones is 2
-        for i in range (cf.NUMBER_OF_SERVERS):
-            X0[i] = Ti[i]
-            X0[i+cf.NUMBER_OF_SERVERS] = To[i]
+        # select the row to initialise (usually the last completed hour)
+        row = final_states.loc[final_states["hour"] == mf.CURRENT_HOUR-1].iloc[0]
+
+        X0 = np.zeros(2 * cf.NUMBER_OF_SERVERS)
+
+        for i in range(cf.NUMBER_OF_SERVERS):
+            X0[i] = row[f"Ti_{i+1}_final"]
+            X0[i + cf.NUMBER_OF_SERVERS] = row[f"To_{i+1}_final"]
 
         TRCU_0_arr = final_states["TRCU_final"][mf.CURRENT_HOUR-1]
         QRCU_0_arr = final_states["QRCU_final"][mf.CURRENT_HOUR-1]
-        
-        PS1_0_arr = PS1_opt[mf.CURRENT_HOUR-1] # use the previous hour optimal server power as initial condition (at the beginning of the hour)
-        PS2_0_arr = PS2_opt[mf.CURRENT_HOUR-1] # unit is watt
-        
+
+        PS1_0_arr = final_states["PS1_final"][mf.CURRENT_HOUR-1] # use the previous hour optimal server power as initial condition (at the beginning of the hour)
+        PS2_0_arr = final_states["PS2_final"][mf.CURRENT_HOUR-1] # unit is watt
+
         # reassign SoC value
         SoC_0 = final_states["SoC_final"][mf.CURRENT_HOUR-1]
 
@@ -277,12 +287,12 @@ def main():
     # Decision vars
     # state variables
 
-    if stg1.mode == 0:
-        print("this is 2nd stage for Uni-optimisation")
-    elif stg1.mode == 1:
-        print("this is 2nd stage for Co-optimisation")
-    else: 
-        print("Error , mode is neither 1 or 0")
+    # if stg1.mode == 0:
+    #     print("this is 2nd stage for Uni-optimisation")
+    # elif stg1.mode == 1:
+    #     print("this is 2nd stage for Co-optimisation")
+    # else: 
+    #     print("Error , mode is neither 1 or 0")
 
     with gp.Env(params=options) as env:
 
@@ -295,7 +305,7 @@ def main():
 
         # Assume one rack with identical servers of two zones
         # X_1  = m.addMVar((2*2, cf.STEP), lb=lb_X[:, None], ub=ub_X[:, None], name="rack 1") # this is the unbounded variables to test the code flows
-        X_1  = m.addMVar((2*2, cf.STEP), name="rack 1")
+        X_1  = m.addMVar((2*cf.NUMBER_OF_SERVERS, cf.STEP), name="rack 1")
 
         # Group server power into an input list
         lb_U = np.array([cf.TRCU_min, cf.QRCU_min, cf.Ps_min, cf.Ps_min])  # For 2 servers
@@ -322,7 +332,7 @@ def main():
         P_fan    = m.addMVar(cf.STEP,  name="P_fan")       # Cooling fan power
         P_cooling = m.addMVar(cf.STEP,  name="P_cooling") # Total cooling power
         avg_TRCU = m.addMVar(cf.STEP,  name="Avg_TRCU") # Average cooling liuid incoming temperature
-        avg_TO = m.addMVar(cf.STEP,  name="Avg_T0") # Average outlet zone temperature
+        avg_TO = m.addMVar(cf.STEP,  name="Avg_TO") # Average outlet zone temperature
 
         # initial conditions of previously determined variables at t = 0
         m.addConstr(X_1[:, 0] == X0, name="initial_states_X_1") # Initial condition for temperatures states
@@ -330,20 +340,22 @@ def main():
         m.addConstr(U[:, 0] == U0, name="initial_inputs_U_0")          # Initial condition for control inputs
         m.addConstr(L_BW[:,0] == np.zeros(cf.NUMBER_OF_SERVERS), name="initial_LBW") # initial batch workload from previous operational period
 
-        # total load and data centre power consumption constraints
-        for t in range(cf.STEP):
-            m.addConstr(
-            L[t] == quicksum(L_BW[j, t] for j in range(cf.NUMBER_OF_SERVERS)) + L_IW_5min_forecast[t],name=f"total_load_{t}"
-            )
-            
-            # P_dc_expr = server_consumption(c_pue, 1, L[t], L_RATE, P_IDLE, P_PEAK)  # must return a LinExpr
-            m.addConstr(P_dc[t] == (A_DC[t] * (cf.P_IDLE + (cf.c_pue-1)) + L[t]*(cf.P_PEAK-cf.P_IDLE)/(cf.L_RATE))/1e3, name=f"pdc_def_{t}")
-    
-        # # Load splits constraints
-        # for t in range(0,cf.STEP):
-        #     total_L_BW = quicksum(L_BW[j,t-1] for j in range(NUMBER_OF_SERVERS)) # total BW that is schedule before time t
-        #     m.addConstr(quicksum(L_BW[j, t] for j in range(NUMBER_OF_SERVERS)) <= quicksum(L_BW_0_5min_forecast[t] for t in range(0,t)) - total_L_BW, name=f"eq_3d_L_{t}") # batch worklaod that is schedule must be smaller than sum of incoming btach workload - already schedule worklaod
+        #End of day workload, all of the schedule workload must be executed within a day
+        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(1,cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
+                    name="end_of_day_workload")
 
+        # constraints for final value of SoC to be equal to initial value
+        m.addConstr(SoC[cf.STEP-1] == SoC_0, name="final_SoC_equals_initial")
+
+        # deviation variables
+        dev_Pimp = np.zeros(cf.STEP)
+        dev_Pexp = np.zeros(cf.STEP)
+        dev_SoC = np.zeros(cf.STEP)
+        dev_LBW1 = np.zeros(cf.STEP)
+        dev_LBW2 = np.zeros(cf.STEP)
+        
+        M = cf.Pbat_max
+        
         cum_arrival = 0
         cum_scheduled = 0
 
@@ -354,21 +366,43 @@ def main():
             # update cumulative scheduled (decision vars)
             cum_scheduled += quicksum(L_BW[j, t] for j in range(cf.NUMBER_OF_SERVERS))
 
+            # workload constraints
+            m.addConstr(
+            L[t] == quicksum(L_BW[j, t] for j in range(cf.NUMBER_OF_SERVERS)) + L_IW_5min_forecast[t],name=f"total_load_{t}"
+            )
+    
+            # P_dc_expr = server_consumption(c_pue, 1, L[t], L_RATE, P_IDLE, P_PEAK)  # must return a LinExpr
+            # m.addConstr(P_dc[t] == (A_DC[t] * (cf.P_IDLE + (cf.c_pue-1)) + L[t]*(cf.P_PEAK-cf.P_IDLE)/(cf.L_RATE))/1e3, name=f"pdc_def_{t}")
+    
             # cannot have scheduled more than has arrived up to time t
             m.addConstr(
                 cum_scheduled <= cum_arrival,
                 name=f"cumulative_batch_feasibility_{t}"
-        )
+            )
 
-
-        #End of day workload, all of the schedule workload must be executed within a day
-        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(1,cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
-                    name="end_of_day_workload")
-
-        # Constraints for QoS: limited time delay for interactive workload
-        for t in range(1,cf.STEP):
+            # Constraints for QoS: limited time delay for interactive workload
             m.addConstr(A_DC[t]*cf.L_RATE - L_IW_5min_forecast[t]>= 0, name=f"A_DC_{t}")
             m.addConstr(A_DC[t]*(cf.L_RATE - 1/cf.MAX_DELAY) - L_IW_5min_forecast[t] <= 0, name=f"qos_delay_{t}")
+
+            # Heat related constraints
+            m.addConstr(
+                avg_TRCU[t] == U[0, t], name=f"avg_TRCU_{t}"
+            )
+
+            # average tmeperature outlet of the two zones
+            m.addConstr(avg_TO[t] == (X_1[2, t] + X_1[3, t]) / cf.NUMBER_OF_SERVERS, name=f"avg_TO_{t}")
+
+            # Cooling power based on COP
+            #m.addConstr(P_source[t] == H_1[t] / COP_C, name=f"cooling_power_{t}")
+            m.addConstr(P_source[t] == H_1[t] / cf.COP_C, name=f"cooling_power_{t}")  #try isolte the effect on cooling power from heat rev
+            m.addConstr(P_fan[t] == cf.BETA_0 + cf.BETA_1*U[1, t] + cf.BETA_2*U[1, t]**2, name=f"fan_power_{t}")
+            m.addConstr(P_cooling[t] == P_source[t] + P_fan[t], name=f"total_cooling_power_{t}")
+            
+            # Waste heat avaialble from servers
+            m.addConstr(H_1[t] == cf.RHO_A * cf.CP_A * U[1,t] * (avg_TO[t] - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
+            
+            # Heat balance
+            m.addConstr(H_sub[t] == heat_demand_5min_forecast[t]*1e3 - H_1[t], name=f"heat_balance_{t}")
 
         # Update temperature dynamics using discretized state-space model
         for t in range(1,cf.STEP):  # start from 1 to avoid negative index
@@ -386,38 +420,11 @@ def main():
                 X_1[:, t] == stg1.A_5min @ X_1[:, t-1] + stg1.B_5min @ U[:, t-1], name=f"temp_dynamics_X_1_{t}"
             )
 
-            m.addConstr(
-                avg_TRCU == U[1, t], name=f"avg_TRCU_{t}"
-            )
-
-            # average tmeperature outlet of the two zones
-            avg_TO = (X_1[2, t] + X_1[3, t]) / 2
-
-            # Original H
-            m.addConstr(H_1[t] == cf.RHO_A * cf.CP_A * U[1,t] * (avg_TO - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
-
-            # Cooling power based on COP
-            #m.addConstr(P_source[t] == H_1[t] / COP_C, name=f"cooling_power_{t}")
-            m.addConstr(P_source[t] == H_1[t] / cf.COP_C, name=f"cooling_power_{t}")  #try isolte the effect on cooling power from heat rev
-            m.addConstr(P_fan[t] == cf.BETA_0 + cf.BETA_1*U[1, t] + cf.BETA_2*U[1, t]**2, name=f"fan_power_{t}")
-            m.addConstr(P_cooling[t] == P_source[t] + P_fan[t], name=f"total_cooling_power_{t}")
-        
-        # constraints for final value of SoC to be equal to initial value
-        m.addConstr(SoC[cf.STEP-1] == SoC_0, name="final_SoC_equals_initial")
-
-        dev_Pimp = np.zeros(cf.STEP)
-        dev_Pexp = np.zeros(cf.STEP)
-        dev_SoC = np.zeros(cf.STEP)
-        dev_LBW1 = np.zeros(cf.STEP)
-        dev_LBW2 = np.zeros(cf.STEP)
-        
-        M = cf.Pbat_max
-
         # Power and heat balance constraints
-        for t in range(1,cf.STEP):
+        for t in range(cf.STEP):
 
             # Power balance constraint
-            Pdc_expr = ff.server_consumption(1.5, A_DC[t], L[t], 2000, cf.P_IDLE, cf.P_PEAK)
+            Pdc_expr = ff.server_consumption(1.5, A_DC[t], L[t], cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
             m.addConstr(
                 Pimp[t] - Pexp[t] +  Pdis[t] - Pch[t] + P_solar_5min_forecast[t] - P_cooling[t]*1e-3 - Pdc_expr == 0,
                 name=f"power_balance_{t}"
@@ -435,9 +442,6 @@ def main():
                 name=f"SoC_{t}"
             )
             
-            # Heat balance
-            m.addConstr(H_sub[t] == heat_demand_5min_forecast[t]*1e3 - H_1[t], name=f"heat_balance_{t}")
-
         # assess the deviation from optimal schedule
         dev_Pimp = P_imp_opt - Pimp
         dev_Pexp = P_exp_opt - Pexp # deiate from the optimal power transfer
@@ -534,7 +538,7 @@ def main():
         N = int(60 / cf.interval)
         sol_hour = {
             "hour": np.repeat(mf.CURRENT_HOUR,int(60/cf.interval)),
-            "interval": list(range(mf.CURRENT_HOUR*int(60/cf.interval), mf.CURRENT_HOUR*int(60/cf.interval)+int(60/cf.interval))),
+            "interval": np.array(range(mf.CURRENT_HOUR*int(60/cf.interval), mf.CURRENT_HOUR*int(60/cf.interval)+int(60/cf.interval))),
             "Pimp":  sol["Pimp"][:N],
             "Pexp":  sol["Pexp"][:N],
             "H":     sol["H"][:N],
@@ -575,67 +579,61 @@ def main():
         Multi_Obj = m.obj_val
         Multi_Energy_Cost = energy_cost
         Multi_Heat_Penalty = heat_pen
+    
+    Ti_final = sol["Ti"][:, N-1]   # shape: (NUMBER_OF_SERVERS,)
+    To_final = sol["To"][:, N-1]
 
-    for i in range(cf.NUMBER_OF_SERVERS):
-        Ti[i] = sol["Ti"][i,int(60/cf.interval)-1]
-        To[i] = sol["To"][i,int(60/cf.interval)-1]
-
-        # export the final states for the next optimisation horizon
+    # export the final states for the next optimisation horizon
     final_states = {
-        "Ti_final": Ti,
-        "To_final": To,
-        "SoC_final": sol["SoC"][int(60/cf.interval)-1],
-        "TRCU_final": sol["TRCU"][int(60/cf.interval)-1],
-        "QRCU_final": sol["QRCU"][int(60/cf.interval)-1],
-        "PS1_final": sol["PS1"][int(60/cf.interval)-1],
-        "PS2_final": sol["PS2"][int(60/cf.interval)-1],
+        "hour": mf.CURRENT_HOUR,
+        "SoC_final": sol["SoC"][N-1],
+        "TRCU_final": sol["TRCU"][N-1],
+        "QRCU_final": sol["QRCU"][N-1],
+        "PS1_final": sol["PS1"][N-1],
+        "PS2_final": sol["PS2"][N-1],
     }
 
-    csv_path = "states.csv"
-    csv_path_con = "stage2_hourly_results.csv"  # to store control actions
-    
-    N = int(60/cf.interval)
-    
-    # data frame for 12 rows in 1 hour
-    df_hour = pd.DataFrame(sol_hour)
-    df_hour["hour"] = mf.CURRENT_HOUR
-    df_hour["interval"] = range(N)
-    df_hour["t_global"] = mf.CURRENT_HOUR * N + df_hour["interval"]
+    # add Ti_i_final and To_i_final as scalars
+    for i in range(cf.NUMBER_OF_SERVERS):
+        final_states[f"Ti_{i+1}_final"] = float(Ti_final[i])
+        final_states[f"To_{i+1}_final"] = float(To_final[i])
 
-    # -- Convert first 12 steps of results into flat format --
-    flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
+    # save states
+    csv_path = "states.csv"
     row_df = pd.DataFrame([final_states]).iloc[0]
     
     # -------------------- Initialise CSV files if file doesnt exist --------------------
-    # Final states CSV (one row per hour)
+    # Final states CSV (one row per hour) this stores system states
     if not os.path.isfile(csv_path):
         df = pd.DataFrame(None, index=range(cf.HOURS), columns=final_states.keys())
-        df.to_csv(csv_path, index=False)
+        row_df.to_csv(csv_path, index=False)
     else:
         df = pd.read_csv(csv_path)
-    # Final states
-    df.loc[mf.CURRENT_HOUR] = row_df
-    df.to_csv(csv_path, index=False)
-    
-    # Control actions CSV (multiple rows: 12 rows per hour)
+        df.loc[mf.CURRENT_HOUR] = row_df # replace df at row = current hour
+        df.to_csv(csv_path, index=False)
+
+    # save control actions
+    csv_path_con = "stage2_hourly_results.csv"  # to store control actions
+    df_hour = pd.DataFrame(sol_hour)
+    flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
+
+    # Control actions CSV (multiple rows: 12 rows per hour), this store control inputs
     if not os.path.isfile(csv_path_con):
-        # Write header on first creation
+        #if file doesnt exist create new csv
         df_hour.to_csv(csv_path_con, index=False)
     else:
         # Load existing file
         df_con = pd.read_csv(csv_path_con)
 
-    # Remove any old rows for this hour
-    df_con = df_con[df_con["hour"] != mf.CURRENT_HOUR]
+        # Remove any old rows for this hour
+        df_con = df_con[df_con["hour"] != mf.CURRENT_HOUR]
 
-    # Append the NEW 12 rows
-    df_con = pd.concat([df_con, df_hour], ignore_index=True)
+        # Append the NEW 12 rows
+        df_con = pd.concat([df_con, df_hour], ignore_index=True)
 
-    # Save back
-    df_con.to_csv(csv_path_con, index=False)
+        # Save back
+        df_con.to_csv(csv_path_con, index=False)
 
-
-    
 
 #%% Supply and demand 
 def plot():
@@ -696,294 +694,38 @@ def iterate():
 
 # %%
 
-# def plot_results(name="file_name", hours=None, plots="all"):
-#     """
-#     Plot results for selected hours and plot types.
-
-#     Parameters
-#     ----------
-#     name  : str
-#         CSV file name containing 5-min interval results.
-#     hours : int, list, or range
-#         Which hours to plot. If multiple hours → merged continuous plot.
-#     plots : str or list
-#         Which plots to show. Options:
-#         "supply", "demand_stack", "supply_demand",
-#         "grid", "heat", "battery", "soc",
-#         "workload", "servers", or "all".
-#     """
-
-#     # Load all 5-min results
-#     df = pd.read_csv(name)
-
-#     # Number of 5-min intervals per hour
-#     N = int(60 / cf.interval)
-
-#     # -------------------------------
-#     # Process "hours" argument
-#     # -------------------------------
-#     if hours is None:
-#         hours = [mf.CURRENT_HOUR]
-
-#     if isinstance(hours, int):
-#         hours = [hours]
-
-#     hours = sorted([h for h in hours if 0 <= h < cf.HOURS])
-
-#     # -------------------------------
-#     # Process "plots" argument
-#     # -------------------------------
-#     if isinstance(plots, str):
-#         if plots == "all":
-#             plots = [
-#                 "supply", "demand_stack", "supply_demand",
-#                 "grid", "heat", "battery", "soc",
-#                 "workload", "servers"
-#             ]
-#         else:
-#             plots = [plots]
-
-#     # -------------------------------
-#     # SELECT THE DATA ACROSS HOURS
-#     # -------------------------------
-#     df_sel = df[df["hour"].isin(hours)].reset_index(drop=True)
-
-#     # Time axis auto scales with number of rows selected
-#     t = np.arange(len(df_sel))
-#     xmax = len(t) - 1     # automatic x-axis right boundary
-
-#     # Extract signals
-#     Pimp = df_sel["Pimp"].values
-#     Pexp = df_sel["Pexp"].values
-#     Pdis = df_sel["Pdis"].values
-#     Pch  = df_sel["Pch"].values
-#     H    = df_sel["H"].values
-#     SoC  = df_sel["SoC"].values
-#     A_DC = df_sel["A_DC"].values
-#     L_BW1 = df_sel["L_BW1"].values
-#     L_BW2 = df_sel["L_BW2"].values
-#     cool = df_sel["P_cooling"].values * 1e-3  # convert W to kW
-
-#     # Build forecast slices for the same merged hours
-#     idx = []
-#     for h in hours:
-#         idx.extend(range(h * N, h * N + N))
-
-#     # read 5 mins forecast from saved csv file
-#     csv_path = "hour_forecasts.csv"
-
-#     # Load full CSV
-#     df = pd.read_csv(csv_path)
-
-#     # Filter rows belonging to the hour 'idx'
-#     df_hour = df[df["interval"].isin(idx)]
-
-#     solar = df_hour["P_solar_forecast"].to_numpy()
-#     wind  = df_hour["P_wind_forecast"].to_numpy()
-#     L_IW  = df_hour["L_IW_forecast"].to_numpy()
-
-#     L_total = L_BW1 + L_BW2 + L_IW
-
-#     # Total loads
-#     P_IT = ff.server_consumption(
-#         1.5, A_DC, L_total, cf.L_RATE, cf.P_IDLE, cf.P_PEAK
-#     )
-#     supply = solar + wind + Pdis + Pimp
-#     demand = P_IT + cool + Pexp + Pch
-
-#     print(f"_____ PLOTTING HOURS {hours} (merged timeline) _____")
-
-#     # ----------------------------------------------------
-#     # SUPPLY STACKPLOT
-#     # ----------------------------------------------------
-#     if "supply" in plots:
-#         plt.figure(figsize=(10, 4))
-#         plt.stackplot(
-#             t,
-#             [solar, wind, Pdis, Pimp],
-#             labels=["Solar", "Wind", "Battery Discharge", "Grid Import"],
-#             colors=["gold", "skyblue", "lightcoral", "violet"],
-#             alpha=0.8
-#         )
-#         plt.title(f"Supply Mix – Hours {hours}")
-#         plt.xlabel("5-min Interval Index")
-#         plt.ylabel("Power (kW)")
-#         plt.legend()
-#         plt.grid(alpha=0.3)
-#         plt.xlim(0, xmax)
-#         plt.tight_layout()
-#         plt.show()
-
-#     # ----------------------------------------------------
-#     # DEMAND STACKPLOT
-#     # ----------------------------------------------------
-#     if "demand" in plots:
-#         plt.figure(figsize=(10, 4))
-#         plt.stackplot(
-#             t,
-#             [P_IT, cool, Pch, Pexp],
-#             labels=["IT Load", "Cooling", "Charging", "Export"],
-#             colors=["dodgerblue", "turquoise", "orange", "purple"],
-#             alpha=0.8
-#         )
-#         plt.title(f"Demand Breakdown – Hours {hours}")
-#         plt.xlabel("5-min Interval Index")
-#         plt.ylabel("Power (kW)")
-#         plt.legend()
-#         plt.grid(alpha=0.3)
-#         plt.xlim(0, xmax)
-#         plt.tight_layout()
-#         plt.show()
-
-#     # ----------------------------------------------------
-#     # SUPPLY vs DEMAND
-#     # ----------------------------------------------------
-#     if "supply_demand" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [supply, demand],
-#             ["Supply", "Demand"],
-#             f"Supply vs Demand – Hours {hours}",
-#             ylabel="kW"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # GRID IMPORT / EXPORT
-#     # ----------------------------------------------------
-#     if "grid" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [Pimp, Pexp],
-#             ["Import", "Export"],
-#             f"Grid Power – Hours {hours}",
-#             ylabel="kW"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # HEAT RECOVERY
-#     # ----------------------------------------------------
-#     if "heat" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [H * 1e-3],
-#             ["Recovered Heat"],
-#             f"Recovered Heat – Hours {hours}",
-#             ylabel="kW(th)"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # BATTERY OPERATION
-#     # ----------------------------------------------------
-#     if "battery" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [Pch, Pdis],
-#             ["Charge", "Discharge"],
-#             f"Battery Operation – Hours {hours}",
-#             ylabel="kW"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # STATE OF CHARGE
-#     # ----------------------------------------------------
-#     if "soc" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [SoC],
-#             ["State of Charge"],
-#             f"SoC – Hours {hours}",
-#             ylabel="SoC"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # WORKLOAD
-#     # ----------------------------------------------------
-#     if "workload" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [L_BW1 + L_BW2, L_IW],
-#             ["Batch Load", "Interactive Load"],
-#             f"Workload – Hours {hours}",
-#             ylabel="Requests/hour"
-#         )
-#         plt.xlim(0, xmax)
-
-#     # ----------------------------------------------------
-#     # ACTIVE SERVERS
-#     # ----------------------------------------------------
-#     if "servers" in plots:
-#         ff.plot_timeseries_multi(
-#             t, [A_DC],
-#             ["Active Servers"],
-#             f"Server Activation – Hours {hours}",
-#             ylabel="Fraction Active"
-#         )
-#         plt.xlim(0, xmax)
-
-
-def plot_results(
-    name="stage2_hourly_results.csv",
-    hours=None,
-    plots="all",
-    xlim=None
-):
+def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
     """
-    Plot Stage-2 MPC results using the same style as MSc_stage1_cleaned,
-    with adjustable x-axis and merged hours.
-
-    Parameters
-    ----------
-    name : str
-        CSV file storing 5-min MPC results.
-    hours : list[int]
-        Which HOURS to include (e.g., [12], [10,11,12]).
-    plots : list[str] or "all"
-        Which plot groups to show.
-    xlim : tuple or list (xmin, xmax)
-        Optional x-axis range in 5-min steps.
+    Stage-2 plotting function using ff.plot_timeseries_multi for all figures.
+    Automatically adjusts x-axis depending on how many hours are selected.
     """
 
-    # --------------------------
-    # Load Stage-2 data (5-min)
-    # --------------------------
     df = pd.read_csv(name)
-    N = int(60 / cf.interval)   # intervals per hour
+    N = int(60 / cf.interval)   # 12 per hour
 
-    # Standard hour handling
+    # ----------------------------
+    # HOURS → INTERVAL INDEX
+    # ----------------------------
     if hours is None:
         hours = [mf.CURRENT_HOUR]
+
     if isinstance(hours, int):
         hours = [hours]
-    hours = [h for h in hours if 0 <= h < cf.HOURS]
 
-    # Build 5-min interval index for all requested hours
-    interval_idx = []
+    hours = sorted(hours)
+
+    intervals = []
     for h in hours:
-        interval_idx.extend(range(h * N, h * N + N))
+        intervals.extend(range(h*N, h*N + N))
 
-    # Select these rows
-    df_sel = df[df["interval"].isin(interval_idx)].reset_index(drop=True)
+    df_sel = df[df["interval"].isin(intervals)].reset_index(drop=True)
 
-    # Build time vector for continuous plots
+    # TIME AXIS (auto-size)
     t = np.arange(len(df_sel))
 
-    # --------------------------
-    # Load the FORECAST data
-    # --------------------------
-    df_f = pd.read_csv("hour_forecasts.csv")
-    df_f = df_f[df_f["interval"].isin(interval_idx)].reset_index(drop=True)
-
-    if len(df_f) == 0:
-        print("⚠️ Forecast rows missing for hours:", hours)
-        return
-
-    solar = df_f["P_solar_forecast"].to_numpy()
-    wind  = df_f["P_wind_forecast"].to_numpy()
-    L_IWf = df_f["L_IW_forecast"].to_numpy()
-    L_DCf = df_f["L_DC_forecast"].to_numpy()
-
-    # --------------------------
-    # Extract solved MPC outputs
-    # --------------------------
+    # ----------------------------
+    # EXTRACT VARIABLES
+    # ----------------------------
     Pimp = df_sel["Pimp"].to_numpy()
     Pexp = df_sel["Pexp"].to_numpy()
     H    = df_sel["H"].to_numpy()
@@ -995,136 +737,248 @@ def plot_results(
 
     Pch  = df_sel["Pch"].to_numpy()
     Pdis = df_sel["Pdis"].to_numpy()
-    cool = df_sel["P_cooling"].to_numpy()*1e-3
+    cool = df_sel["P_cooling"].to_numpy()
 
-    # Combined loads
-    L_total = LBW1 + LBW2 + L_IWf
+    TRCU = df_sel["TRCU"].to_numpy()
+    QRCU = df_sel["QRCU"].to_numpy()
+    PS1  = df_sel["PS1"].to_numpy()
+    PS2  = df_sel["PS2"].to_numpy()
 
-    # --------------------------
-    # DEFINE PLOT SET
-    # --------------------------
+    Ti1 = df_sel["Ti1"].to_numpy()
+    Ti2 = df_sel["Ti2"].to_numpy()
+    To1 = df_sel["To1"].to_numpy()
+    To2 = df_sel["To2"].to_numpy()
+
+    # ----------------------------
+    # FORECASTS
+    # ----------------------------
+    df_f = pd.read_csv("hour_forecasts.csv")
+    df_f = df_f[df_f["interval"].isin(intervals)].reset_index(drop=True)
+
+    solar = df_f["P_solar_forecast"].to_numpy()
+    wind  = df_f["P_wind_forecast"].to_numpy()
+    L_IWf = df_f["L_IW_forecast"].to_numpy()
+
+    p_bw1 = ff.server_consumption(1.5, A_DC, LBW1, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+    p_bw2 = ff.server_consumption(1.5, A_DC, LBW2, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+    p_iw = ff.server_consumption(1.5, A_DC, L_IWf, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+
+    # ----------------------------
+    # RESOLVE PLOT LIST
+    # ----------------------------
     if isinstance(plots, str):
         if plots == "all":
             plots = [
-                "supply",
-                "supply_demand",
-                "grid",
-                "heat",
-                "battery",
-                "soc",
-                "workload",
-                "servers"
+                "supply", "demand_stack", "supply_demand",
+                "grid", "battery", "soc",
+                "cooling", "temps", "servers",
+                "accum_bw", "workload_stack"
             ]
         else:
             plots = [plots]
 
-    # --------------------------
-    # 1️⃣ SUPPLY PLOT (solar + wind + cooling load + grid)
-    # --------------------------
+    # ============================================================
+    # 1. SUPPLY (solar + wind + battery discharge)
+    # ============================================================
     if "supply" in plots:
         ff.plot_timeseries_multi(
             t,
-            [solar, wind, cool],
-            labels=["Solar forecast", "Wind forecast", "Cooling power (kW)"],
-            title="Supply Components (5-min resolution)",
+            [solar, wind, Pdis],
+            ["Solar", "Wind", "Battery Discharge"],
+            title="Available Supply (5-min resolution)",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 2️⃣ SUPPLY vs DEMAND PLOT
-    # --------------------------
+    # ============================================================
+    # 2. DEMAND STACK (IW + BW + cooling)
+    # ============================================================
+    if "demand_stack" in plots:
+        total_cool_kW = cool * 1e-3
+        plt.figure()
+        plt.stackplot(
+            t,
+            p_iw,        # Interactive load
+            p_bw1,       # Batch workload zone 1
+            p_bw2,       # Batch workload zone 2
+            total_cool_kW,  # Cooling
+            labels=["Interactive", "BW Zone 1", "BW Zone 2", "Cooling"],
+            alpha=0.8
+        )
+
+        plt.title("Demand Breakdown (stacked)")
+        plt.xlabel("5-min steps")
+        plt.ylabel("kW")
+        plt.legend(loc="upper left")
+        plt.tight_layout()
+        plt.show()
+
+    # ============================================================
+    # 3. SUPPLY VS DEMAND
+    # ============================================================
     if "supply_demand" in plots:
+        total_supply = solar + wind + Pdis + Pimp
+        total_demand = p_bw1 + p_bw2 + p_iw + cool*1e-3 + Pexp + Pch
         ff.plot_timeseries_multi(
             t,
-            [solar + wind, L_total],
-            labels=["Renewable supply (solar+wind)", "Total demand"],
-            title="Supply vs Total Demand",
+            [total_supply, total_demand],
+            ["Total Supply", "Total Demand"],
+            title="Supply vs Demand",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 3️⃣ GRID IMPORT/EXPORT
-    # --------------------------
+    # ============================================================
+    # 4. GRID IMPORT / EXPORT
+    # ============================================================
     if "grid" in plots:
         ff.plot_timeseries_multi(
             t,
             [Pimp, Pexp],
-            labels=["Grid import", "Grid export"],
-            title="Grid Transfer",
+            ["Import", "Export"],
+            title="Grid Import / Export",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 4️⃣ HEAT RECOVERY
-    # --------------------------
-    if "heat" in plots:
-        ff.plot_timeseries_multi(
-            t, [H],
-            labels=["Recovered heat"],
-            title="Recovered Heat (H)",
-            ylabel="W",
-            xlabel="5-min intervals",
-            xlim=xlim
-        )
-
-    # --------------------------
-    # 5️⃣ BATTERY POWER
-    # --------------------------
+    # ============================================================
+    # 5. BATTERY POWER FLOW
+    # ============================================================
     if "battery" in plots:
         ff.plot_timeseries_multi(
             t,
-            [Pch, -Pdis],
-            labels=["Battery charging (+)", "Battery discharging (–)"],
-            title="Battery Operation",
+            [Pch, Pdis],
+            ["Charge", "Discharge"],
+            title="Battery Power Flow",
             ylabel="kW",
-            xlabel="5-min intervals",
-            xlim=xlim
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 6️⃣ STATE OF CHARGE
-    # --------------------------
+    # ============================================================
+    # 6. BATTERY STATE OF CHARGE
+    # ============================================================
     if "soc" in plots:
         ff.plot_timeseries_multi(
-            t, [SoC],
-            labels=["SoC"],
-            title="Battery SoC",
-            ylabel="State of Charge",
-            xlabel="5-min intervals",
-            xlim=xlim
+            t,
+            [SoC],
+            ["SoC"],
+            title="Battery State of Charge",
+            ylabel="SoC",
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 7️⃣ WORKLOAD PLOTS
-    # --------------------------
-    if "workload" in plots:
+    # ============================================================
+    # 7. COOLING POWER (kW)
+    # ============================================================
+    if "cooling" in plots:
         ff.plot_timeseries_multi(
             t,
-            [LBW1, LBW2, L_IWf],
-            labels=["Batch Z1", "Batch Z2", "Interactive forecast"],
-            title="Workload Breakdown",
-            ylabel="Requests / 5-min",
-            xlabel="Time",
-            xlim=xlim
+            [cool * 1e-3],
+            ["Cooling Power"],
+            title="Cooling Power",
+            ylabel="kW",
+            xlabel="5-min steps"
         )
 
-    # --------------------------
-    # 8️⃣ SERVERS ACTIVE
-    # --------------------------
+    # ============================================================
+    # 8. TEMPERATURES
+    # ============================================================
+    if "temps" in plots:
+        ff.plot_timeseries_multi(
+            t,
+            [Ti1, Ti2, To1, To2],
+            ["Ti1", "Ti2", "To1", "To2"],
+            title="Rack Temperatures",
+            ylabel="°C",
+            xlabel="5-min steps"
+        )
+
+    # ============================================================
+    # 9. SERVER POWER
+    # ============================================================
     if "servers" in plots:
         ff.plot_timeseries_multi(
-            t, [A_DC],
-            labels=["Active servers"],
-            title="Active Server Count",
-            ylabel="Servers",
-            xlabel="5-min intervals",
-            xlim=xlim
+            t,
+            [PS1, PS2],
+            ["Server Zone 1", "Server Zone 2"],
+            title="Server Power",
+            ylabel="W",
+            xlabel="5-min steps"
         )
 
-    print("✔ Plotting complete for hours:", hours)
+    # ============================================================
+    # 11. ACCUMULATED BATCH WORKLOAD (BW1 + BW2)
+    # ============================================================
+    if "accum_bw" in plots:
+        bw1_acc = np.cumsum(LBW1)
+        bw2_acc = np.cumsum(LBW2)
+        bw_total_acc = bw1_acc + bw2_acc
+
+        ff.plot_timeseries_multi(
+            t,
+            [bw1_acc, bw2_acc, bw_total_acc],
+            ["Accum BW1", "Accum BW2", "Total Accum BW"],
+            title="Accumulated Batch Workload",
+            ylabel="Cumulative Requests",
+            xlabel="5-min steps"
+        )
+    
+    # ============================================================
+    # WORKLOAD STACK CHART (Stage-1 style, adapted for 5-min)
+    # ============================================================
+    if "workload_stack" in plots:
+
+        # --- Stage 2 uses 5-minute data instead of hourly data ---
+        IW = L_IWf                    # interactive workload (5-min)
+        BW1 = LBW1                    # batch workload zone 1 (5-min)
+        BW2 = LBW2                    # batch workload zone 2 (5-min)
+
+        BW_total = BW1 + BW2
+        total_load = IW + BW_total
+
+        t_steps = np.arange(len(IW))   # 5-min intervals across selected hours
+
+        plt.figure(figsize=(10, 4))
+
+        # -----------------------------
+        # STACKED BARS (same idea as stage 1)
+        # -----------------------------
+        plt.bar(t_steps, IW,
+                label="Interactive Load (IW)", alpha=0.8)
+
+        plt.bar(t_steps, BW1,
+                bottom=IW, label="Batch Zone 1 (BW1)", alpha=0.8)
+
+        plt.bar(t_steps, BW2,
+                bottom=IW + BW1, label="Batch Zone 2 (BW2)", alpha=0.8)
+
+        # -----------------------------
+        # OVERLAY LINES (same as stage 1)
+        # -----------------------------
+        plt.plot(t_steps, IW,
+                linestyle="--", linewidth=2, color="black",
+                label="IW (original line)")
+
+        # ORIGINAL batch workload reference (hourly)
+        # → repeat each hour’s BW_0 value 12 times to match 5-min resolution
+        if hasattr(mf, "L_BW_0"):
+            L_BW_orig_5min = np.repeat(mf.L_BW_0, N)[:len(IW)]
+            plt.plot(t_steps, L_BW_orig_5min,
+                    linestyle="-.", linewidth=2, color="red",
+                    label="BW original line")
+
+        plt.plot(t_steps, total_load,
+                linewidth=2, color="blue",
+                label="Total Load (IW + BW)")
+
+        # -----------------------------
+        # LABELS & DECORATION
+        # -----------------------------
+        hrs_str = f"{hours}" if isinstance(hours, list) else str(hours)
+        plt.title(f"Data Centre Load: Stack + Original Curves (Hours {hrs_str})")
+        plt.xlabel("5-minute intervals")
+        plt.ylabel("Requests per 5-min")
+        plt.grid(alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()

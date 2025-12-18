@@ -1,6 +1,5 @@
 # %%
 # import the neccessary libraries
-from copyreg import pickle
 from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
@@ -161,6 +160,13 @@ def initialise():
     B_5min = sys_dis_5min.B
     C_5min = sys_dis_5min.C
     D_5min = sys_dis_5min.D
+
+    eigenvalues_5min = np.linalg.eigvals(A_5min)
+    # print("Eigenvalues of the discrete system:", eigenvalues)
+    if np.all(np.abs(eigenvalues_5min) < 1):
+        print("The discrete-time system (A_5min) is stable.")
+    else:
+        print("The discrete-time system (A_5min) is unstable.")
 
     # === Combine discrete thermal dynamics with SoC and Pexe equations ===
     Nstate = 6
@@ -513,8 +519,8 @@ def main():
         # Group server power into an input list
         lb_U = np.array([cf.TRCU_min, cf.QRCU_min, cf.Ps_min, cf.Ps_min])  # For 2 servers
         ub_U = np.array([cf.TRCU_max, cf.QRCU_max, cf.Ps_max, cf.Ps_max])  # For 2 servers
-        # U = m.addMVar((4, cf.HOURS), lb=lb_U[:, None], ub=ub_U[:, None], name="U")  # Control variables
-        U = m.addMVar((4, cf.HOURS), lb=np.tile(lb_U[:, None], (1, cf.HOURS)), ub=np.tile(ub_U[:, None], (1, cf.HOURS)), name="U")  # Control variables
+        # U = m.addMVar((2*cf.NUMBER_OF_SERVERS, cf.HOURS), lb=lb_U[:, None], ub=ub_U[:, None], name="U")  # Control variables
+        U = m.addMVar((2*cf.NUMBER_OF_SERVERS, cf.HOURS), lb=np.tile(lb_U[:, None], (1, cf.HOURS)), ub=np.tile(ub_U[:, None], (1, cf.HOURS)), name="U")  # Control variables
 
         L_BW = m.addMVar((cf.NUMBER_OF_SERVERS, cf.HOURS), lb=0, ub=L_max, name="L_BW")  # Data centre load
         A_DC = m.addMVar((cf.HOURS), lb=0, ub=10,     name="A_DC")  # number of active server
@@ -536,7 +542,7 @@ def main():
         P_fan    = m.addMVar(cf.HOURS,  name="P_fan")       # Cooling fan power
         P_cooling = m.addMVar(cf.HOURS,  name="P_cooling") # Total cooling power
         avg_TRCU = m.addMVar(cf.HOURS,  name="Avg_TRCU") # Average cooling liuid incoming temperature
-        avg_TO = m.addMVar(cf.HOURS,  name="Avg_T0") # Average outlet zone temperature
+        avg_TO = m.addMVar(cf.HOURS,  name="Avg_TO") # Average outlet zone temperature
 
         # initial conditions of previously determined variables at t = 0
         m.addConstr(X_1[:, 0] == X0, name="initial_states_X_1") # Initial condition for temperatures states
@@ -572,6 +578,19 @@ def main():
             # Sufficinet active servers for batch workload
             m.addConstr(cf.L_RATE*A_DC[t] >= quicksum(L_BW[i][t] for i in range(cf.NUMBER_OF_SERVERS)), name=f"active_server_for_BW")
 
+            # waste heat recovery model constraints
+            # average tmeperature outlet of the two zones
+            m.addConstr(avg_TO[t] == (X_1[2, t] + X_1[3, t]) / cf.NUMBER_OF_SERVERS, name=f"avg_TO_{t}")
+
+            # Original H
+            m.addConstr(H_1[t] == RHO_A * CP_A * U[1,t] * (avg_TO[t] - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
+
+            # Cooling power based on COP
+            m.addConstr(P_source[t] == H_1[t] / COP_C, name=f"cooling_power_{t}")  
+            m.addConstr(P_fan[t] == beta_0 + beta_1*U[1, t] + beta_2*U[1, t]**2, name=f"fan_power_{t}")
+            m.addConstr(P_cooling[t] == P_source[t] + P_fan[t], name=f"total_cooling_power_{t}")
+    
+
         #End of day workload, all of the schedule workload must be executed within a day
         m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(cf.HOURS)) == quicksum(L_BW_0[t] for t in range(cf.HOURS)), name="end_of_day_workload")
 
@@ -598,20 +617,8 @@ def main():
             )
 
             m.addConstr(
-                avg_TRCU == U[1, t], name=f"avg_TRCU_{t}"
-            )
-
-            avg_TO = (X_1[2, t] + X_1[3, t]) / 2
-            dT = avg_TO - avg_TRCU
-
-            # Original H
-            m.addConstr(H_1[t] == cf.RHO_A * cf.CP_A * U[1,t] * (avg_TO - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
-
-            # Cooling power based on COP
-            m.addConstr(P_source[t] == H_1[t] / cf.COP_C, name=f"cooling_power_{t}")  
-            m.addConstr(P_fan[t] == cf.BETA_0 + cf.BETA_1*U[1, t] + cf.BETA_2*U[1, t]**2, name=f"fan_power_{t}")
-            m.addConstr(P_cooling[t] == P_source[t] + P_fan[t], name=f"total_cooling_power_{t}")
-        
+                avg_TRCU[t] == U[0, t], name=f"avg_TRCU_{t}"
+            )  
         
         # constraints for final value of SoC to be equal to initial value
         m.addConstr(SoC[cf.HOURS-1] == cf.SoC_0, name="final_SoC_equals_initial")
@@ -792,19 +799,6 @@ def main():
                                 sol["PS1"][hour],
                                 sol["PS2"][hour]])
     
-    # stage1_outputs = {
-    #     "mode": mode,
-    #     "A_5min": A_5min,
-    #     "B_5min": B_5min,
-    #     "p_buy": p_buy,
-    #     "p_sell": p_sell,
-    #     "p_gas": p_gas,
-    # }
-
-    # file_name = 'stage1_outputs.pkl'
-    # with open(file_name, 'wb') as file:
-    #     pickle.dump(stage1_outputs, file)   
-
 
 # to execute main function when run python script directly
 if __name__ == "__main__":
