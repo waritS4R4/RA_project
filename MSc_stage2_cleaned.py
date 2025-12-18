@@ -306,7 +306,8 @@ def main():
         A_DC = m.addMVar((cf.STEP), lb=0, ub=5,     name="A_DC")  # Data centre load
         L    = m.addVars(cf.STEP, name="L")          # total load
         P_dc = m.addVars(cf.STEP, name="P_dc")       # data centre power
-        
+        B = m.addMVar(cf.STEP, lb=0, name="backlog")
+
         SoC  = m.addMVar(cf.STEP, lb=cf.SoC_min, ub=cf.SoC_max, name="SoC")   # Battery SoC
         H_sub = m.addMVar(cf.STEP, name="H_sub")  # Auxiliary, no explicit bounds
         H_1   = m.addMVar(cf.STEP, lb=0, name="H_1")                          # Heat extracted 
@@ -330,8 +331,18 @@ def main():
         m.addConstr(L_BW[:,0] == np.zeros(cf.NUMBER_OF_SERVERS), name="initial_LBW") # initial batch workload from previous operational period
 
         #End of period workload, all of the schedule workload must be executed within the period
-        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
-                    name="end_of_period_workload")
+        # m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
+        #             name="end_of_period_workload")
+        m.addConstr(B[0] == L_BW_0_5min_forecast[0] - quicksum(L_BW[j,0] for j in range(cf.NUMBER_OF_SERVERS)), name="initial_backlog")
+        for t in range(1, cf.STEP):
+            m.addConstr(
+                B[t] == B[t-1]
+                    + L_BW_0_5min_forecast[t]
+                    - quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS))
+            )
+
+        # hard end-of-period
+        m.addConstr(B[cf.STEP-1] == 0)
 
         # constraints for final value of SoC to be equal to initial value
         m.addConstr(SoC[cf.STEP-1] == SoC_0, name="final_SoC_equals_initial")
