@@ -936,7 +936,7 @@ def plot():
         acc_LBW[i] = L_BW_0[i] + acc_LBW[i-1]
         acc_sol_LBW[i] = sol["L_BW"][0][i] + sol["L_BW"][1][i] + acc_sol_LBW[i-1]
 
-    ff.plot_timeseries_multi(t, [acc_LBW, acc_sol_LBW], ["L_BW", "schl_LBW"], "Accumulated BW", ylabel="BW")
+    ff.plot_timeseries_multi(t, [acc_LBW, acc_sol_LBW], ["L_BW", "schl_LBW"], "Accumulated BW (# of requests)", ylabel="BW")
 
 
 # %% 

@@ -329,9 +329,9 @@ def main():
         m.addConstr(U[:, 0] == U0, name="initial_inputs_U_0")          # Initial condition for control inputs
         m.addConstr(L_BW[:,0] == np.zeros(cf.NUMBER_OF_SERVERS), name="initial_LBW") # initial batch workload from previous operational period
 
-        #End of day workload, all of the schedule workload must be executed within a day
-        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(1,cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
-                    name="end_of_day_workload")
+        #End of period workload, all of the schedule workload must be executed within the period
+        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
+                    name="end_of_period_workload")
 
         # constraints for final value of SoC to be equal to initial value
         m.addConstr(SoC[cf.STEP-1] == SoC_0, name="final_SoC_equals_initial")
@@ -715,7 +715,9 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
     df_sel = df[df["interval"].isin(intervals)].reset_index(drop=True)
 
     # TIME AXIS (auto-size)
-    t = np.arange(len(df_sel))
+    dt_hours = cf.interval / 60   # minutes → hours
+    t0 = mf.CURRENT_HOUR
+    t = t0 + np.arange(len(df_sel)) * dt_hours
 
     # ----------------------------
     # EXTRACT VARIABLES
@@ -907,11 +909,12 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
         bw1_acc = np.cumsum(LBW1)
         bw2_acc = np.cumsum(LBW2)
         bw_total_acc = bw1_acc + bw2_acc
+        bw_arrv = np.cumsum(df_f["L_BW_forecast"].to_numpy())
 
         ff.plot_timeseries_multi(
             t,
-            [bw1_acc, bw2_acc, bw_total_acc],
-            ["Accum BW1", "Accum BW2", "Total Accum BW"],
+            [bw1_acc, bw2_acc, bw_total_acc, bw_arrv],
+            ["Accum BW1", "Accum BW2", "Total Accum BW", "Accum Arrivals"],
             title="Accumulated Batch Workload",
             ylabel="Cumulative Requests",
             xlabel="5-min steps"
