@@ -7,15 +7,39 @@ from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
 import os
 
+from state_io import load_state, save_state
+
+# ---- Stage-1 artifacts loader (decouple Stage-2 from Stage-1 Python module) ----
+def load_stage1_artifacts(path: str = "stage1_artifacts.npz") -> dict:
+    data = np.load(path, allow_pickle=False)
+    return {
+        "mode": int(data["mode"][0]),
+        "L_max": float(data["L_max"][0]),
+        "p_buy": data["p_buy"].astype(float),
+        "p_sell": data["p_sell"].astype(float),
+        "p_gas": data["p_gas"].astype(float),
+        "A_5min": data["A_5min"].astype(float),
+        "B_5min": data["B_5min"].astype(float),
+    }
+
 # import all the neccessary dependencies
 import functions as ff
 import constant_file as cf
 import Monitored_file as mf # L_DC, L_IW, CURRENT_HOUR
 from Monitored_file import L_DC, L_IW
-import MSc_stage1_cleaned as stg1
 
 
 def initialise(h):
+    # Load Stage-1 artifacts (mode, prices, thermal model matrices)
+    art = load_stage1_artifacts()
+    global MODE, L_MAX, A_5MIN, B_5MIN, P_BUY_HR, P_SELL_HR, P_GAS_HR
+    MODE = art["mode"]
+    L_MAX = art["L_max"]
+    A_5MIN = art["A_5min"]
+    B_5MIN = art["B_5min"]
+    P_BUY_HR = art["p_buy"]
+    P_SELL_HR = art["p_sell"]
+    P_GAS_HR = art["p_gas"]
     # declare golbal variables
     global P_wind_5min, P_wind_5min_forecast
     global P_solar, P_solar_5min, P_solar_5min_forecast
@@ -25,9 +49,9 @@ def initialise(h):
     global optimal_schedule
 
     # Load the optimal schedule based on the selected mode extracted from the 
-    if stg1.mode == 0:
+    if MODE == 0:
         optimal_schedule = pd.read_csv('schedule_single_objective.csv')
-    elif stg1.mode == 1:
+    elif MODE == 1:
         optimal_schedule = pd.read_csv('schedule_multi_objective.csv')
     else:
         raise ValueError("Invalid mode selected.")
@@ -78,9 +102,9 @@ def initialise(h):
     L_BW_0_5min_forecast = (L_DC_5min_forecast - L_IW_5min_forecast) # exact batch workload at each time step
 
     # electricity and gas prices
-    p_buy_5min = np.repeat(stg1.p_buy, 12)
-    p_sell_5min = np.repeat(stg1.p_sell, 12)
-    p_gas_5min = np.repeat(stg1.p_gas, 12)
+    p_buy_5min = np.repeat(P_BUY_HR, 12)
+    p_sell_5min = np.repeat(P_SELL_HR, 12)
+    p_gas_5min = np.repeat(P_GAS_HR, 12)
 
     #save the first hourly forecast to csv so that i can be used later in the results plots
     j = int(60/cf.interval)
@@ -219,64 +243,34 @@ def main():
     # read final values from the stored csv file
     # import the previous period final states as initial conditions
 
-    # check is the current hour is the initial hour
-    if mf.CURRENT_HOUR == 0:
-        TI_0 = np.full(2, cf.TI_10)   # initial inlet temp for all servers
-        TO_0 = np.full(2, cf.TO_10)   # initial outlet temp for all servers
-        X0 = np.concatenate([TI_0, TO_0])          # shape (20,) for 10 servers
+    # check if the current hour is the initial hour; otherwise load previous-hour state from disk
+    prev = load_state("states.csv", mf.CURRENT_HOUR - 1, cf.NUMBER_OF_SERVERS)
 
-        TRCU_0_arr = np.full(1, cf.TRCU_0)  # initial cold air supply temperature for single RCU per rack
-        QRCU_0_arr = np.full(1, cf.QRCU_0)  # initial airflow for single RCU
-        PS_0_arr = np.full(cf.NUMBER_OF_SERVERS, cf.PS_0)  # initial server power for all servers
-        U0 = np.concatenate([TRCU_0_arr, QRCU_0_arr, PS_0_arr])
+    if prev is None:
+        TI_0 = np.full(cf.NUMBER_OF_SERVERS, cf.TI_10)
+        TO_0 = np.full(cf.NUMBER_OF_SERVERS, cf.TO_10)
+        X0 = np.concatenate([TI_0, TO_0])
 
-        # reassign SoC value
         SoC_0 = cf.SoC_0
-    
-    # if not the first hour
-    elif mf.CURRENT_HOUR > 0:
-        # final_states = pd.read_csv('states.csv')
-        # X0 = np.zeros(2*cf.NUMBER_OF_SERVERS) #number of zones is 2
 
-        # # for i in range (cf.NUMBER_OF_SERVERS):
-        # #     X0[i] = Ti[i]
-        # #     X0[i+cf.NUMBER_OF_SERVERS] = To[i]
+        TRCU_0_arr = np.full(1, cf.TRCU_0)
+        QRCU_0_arr = np.full(1, cf.QRCU_0)
+        PS_0_arr = np.full(cf.NUMBER_OF_SERVERS, cf.PS_0)
+        U0 = np.concatenate([TRCU_0_arr, QRCU_0_arr, PS_0_arr])
+    else:
+        X0 = prev["X0"]
+        SoC_0 = prev["SoC_0"]
+        U0 = prev["U0"]
 
-        final_states = pd.read_csv("states.csv")
-        h_prev = mf.CURRENT_HOUR - 1
-
-        Ti_prev = np.array([
-            final_states.iloc[h_prev][f"Ti_{i}"]
-            for i in range(cf.NUMBER_OF_SERVERS)
-        ], dtype=float)
-
-        To_prev = np.array([
-            final_states.iloc[h_prev][f"To_{i}"]
-            for i in range(cf.NUMBER_OF_SERVERS)
-        ], dtype=float)
-
-        X0 = np.concatenate([Ti_prev, To_prev])
-
-        TRCU_0_arr = final_states["TRCU_final"][h_prev]
-        QRCU_0_arr = final_states["QRCU_final"][h_prev]
-        # PS1_0_arr = PS1_opt[h_prev] # use the previous hour optimal server power as initial condition (at the beginning of the hour)
-        # PS2_0_arr = PS2_opt[h_prev] # unit is watt
-        PS1_0_arr = final_states["PS1_final"][h_prev]
-        PS2_0_arr = final_states["PS2_final"][h_prev]
-        U0 = np.array([TRCU_0_arr, QRCU_0_arr, PS1_0_arr, PS2_0_arr])
-        
-        # reassign SoC value
-        SoC_0 = final_states["SoC_final"][h_prev]
-
-        
-
+    if cf.NUMBER_OF_SERVERS != 2:
+        raise NotImplementedError("Stage-2 optimisation is currently coded for 2 servers (U has 4 rows). Extend U/constraints to support more servers.")
     # %%
     # Decision vars
     # state variables
 
-    if stg1.mode == 0:
+    if MODE == 0:
         print("this is 2nd stage for Uni-optimisation")
-    elif stg1.mode == 1:
+    elif MODE == 1:
         print("this is 2nd stage for Co-optimisation")
     else: 
         print("Error , mode is neither 1 or 0")
@@ -300,7 +294,7 @@ def main():
         # U = m.addMVar((4, cf.HOURS), lb=lb_U[:, None], ub=ub_U[:, None], name="U")  # Control variables
         U = m.addMVar((4, cf.STEP), lb=np.tile(lb_U[:, None], (1, cf.STEP)), ub=np.tile(ub_U[:, None], (1, cf.STEP)), name="U")  # Control variables
 
-        L_BW = m.addMVar((cf.NUMBER_OF_SERVERS, cf.STEP), lb=0, ub=stg1.L_max, name="L_BW")  # Data centre load
+        L_BW = m.addMVar((cf.NUMBER_OF_SERVERS, cf.STEP), lb=0, ub=L_MAX, name="L_BW")  # Data centre load
         A_DC = m.addMVar((cf.STEP), lb=0, ub=5,     name="A_DC")  # Data centre load
         L    = m.addVars(cf.STEP, name="L")          # total load
         P_dc = m.addVars(cf.STEP, name="P_dc")       # data centre power
@@ -345,7 +339,7 @@ def main():
         cum_arrival = 0
         cum_scheduled = 0
 
-        for t in range(0,cf.STEP):
+        for t in range(cf.STEP):
             # update cumulative arrivals (data, not decision vars)
             cum_arrival += L_BW_0_5min_forecast[t]
 
@@ -360,11 +354,11 @@ def main():
 
 
         #End of day workload, all of the schedule workload must be executed within a day
-        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(0,cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
+        m.addConstr(quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS) for t in range(1,cf.STEP)) == quicksum(L_BW_0_5min_forecast[t] for t in range(cf.STEP)),
                     name="end_of_day_workload")
 
         # Constraints for QoS: limited time delay for interactive workload
-        for t in range(0,cf.STEP):
+        for t in range(1,cf.STEP):
             m.addConstr(A_DC[t]*cf.L_RATE - L_IW_5min_forecast[t]>= 0, name=f"A_DC_{t}")
             m.addConstr(A_DC[t]*(cf.L_RATE - 1/cf.MAX_DELAY) - L_IW_5min_forecast[t] <= 0, name=f"qos_delay_{t}")
 
@@ -381,23 +375,22 @@ def main():
 
             m.addConstr(
                 # Compute server power from A and L using the matrix derived from the rack based model
-                X_1[:, t] == stg1.A_5min @ X_1[:, t-1] + stg1.B_5min @ U[:, t-1], name=f"temp_dynamics_X_1_{t}"
+                X_1[:, t] == A_5MIN @ X_1[:, t-1] + B_5MIN @ U[:, t-1], name=f"temp_dynamics_X_1_{t}"
             )
 
-            m.addConstr(
-                avg_TRCU == U[1, t], name=f"avg_TRCU_{t}"
-            )
+            m.addConstr(avg_TRCU[t] == U[1, t], name=f"avg_TRCU_{t}")
 
-            # SoC update constraint
-            m.addConstr(
-                SoC[t] == (1-cf.ETA_LOSS)*SoC[t-1]
-                    + cf.ETA_CH * Pch[t] * 1e3 * cf.interval*60/cf.E_ESS
-                    - (1/cf.ETA_DCH) * Pdis[t] * 1e3 * cf.interval*60/cf.E_ESS,
-                name=f"SoC_{t}"
-            )
+            # SoC update constraint (avoid t=0 using SoC[-1])
+            if t >= 1:
+                m.addConstr(
+                    SoC[t] == (1-cf.ETA_LOSS)*SoC[t-1]
+                        + cf.ETA_CH * Pch[t] * 1e3 * cf.interval*60/cf.E_ESS
+                        - (1/cf.ETA_DCH) * Pdis[t] * 1e3 * cf.interval*60/cf.E_ESS,
+                    name=f"SoC_{t}"
+                )
 
             # average tmeperature outlet of the two zones
-            avg_TO = (X_1[2, t] + X_1[3, t]) / 2
+            m.addConstr(avg_TO[t] == (X_1[2, t] + X_1[3, t]) / 2, name=f"avg_TO_{t}")
 
             # Original H
             m.addConstr(H_1[t] == cf.RHO_A * cf.CP_A * U[1,t] * (avg_TO - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
@@ -461,7 +454,7 @@ def main():
 
         # Cost for substituting heat with gas boiler when waste heat is insufficient:
         # A * delta_t * sum(p_gas_5min[t] * (heat_demand[t] - H_1[t])^2 )
-        obj += quicksum(stg1.mode * (cf.interval/60)*p_gas_5min[t] * (H_sub[t]*1e-3) + (1-stg1.mode) * (cf.interval/60) * p_gas_5min[t] * (heat_demand_5min_forecast[t]) for t in range(cf.STEP))
+        obj += quicksum(MODE * (cf.interval/60)*p_gas_5min[t] * (H_sub[t]*1e-3) + (1-MODE) * (cf.interval/60) * p_gas_5min[t] * (heat_demand_5min_forecast[t]) for t in range(cf.STEP))
 
         m.setObjective(obj, GRB.MINIMIZE)
         m.setParam("InfUnbdInfo", 1)  # Distinguish infeasible/unbounded
@@ -555,7 +548,7 @@ def main():
             "To2":  sol["To"][1, :N],
             }
         
-    for i in range(0, cf.STEP):
+    for i in range(1, cf.STEP):
         energy_cost = (cf.interval/60) * np.sum(p_buy_5min[i] * sol["Pimp"] - p_sell_5min[i] * sol["Pexp"] + p_gas_5min[i]*(heat_demand_5min[i] - sol["H"]*1e-3))
         heat_pen    = np.sum( (cf.interval/60) * p_gas_5min[i] * (heat_demand_5min_forecast[i] - sol["H"]*1e-3)**2)
 
@@ -564,11 +557,11 @@ def main():
     print(f"  Heat penalty term: {heat_pen:.4f}")
 
     # store objective values based on mode
-    if stg1.mode == 0:
+    if MODE == 0:
         Single_Obj = m.obj_val
         Single_Energy_Cost = energy_cost
         Single_Heat_Penalty = heat_pen
-    elif stg1.mode == 1:
+    elif MODE == 1:
         Multi_Obj = m.obj_val
         Multi_Energy_Cost = energy_cost
         Multi_Heat_Penalty = heat_pen
@@ -577,49 +570,19 @@ def main():
     Ti = np.zeros(cf.NUMBER_OF_SERVERS)
     To = np.zeros(cf.NUMBER_OF_SERVERS)
 
-    final_states = {}
-    for i in range(cf.NUMBER_OF_SERVERS):
-        Ti[i] = sol["Ti"][i,int(60/cf.interval)-1]
-        To[i] = sol["To"][i,int(60/cf.interval)-1]
+    # Save final states for next hour (one row per hour, scalable over NUMBER_OF_SERVERS)
+    Ti_end = sol["Ti"][:, N-1]
+    To_end = sol["To"][:, N-1]
+    U_end = np.array([sol["TRCU"][N-1], sol["QRCU"][N-1], sol["PS1"][N-1], sol["PS2"][N-1]], dtype=float)
 
-    if mf.CURRENT_HOUR >= 0:
-        for i in range(cf.NUMBER_OF_SERVERS):
-            final_states[f"Ti_{i}"] = Ti[i]
-            final_states[f"To_{i}"] = To[i]
+    save_state("states.csv", mf.CURRENT_HOUR, Ti_end, To_end, sol["SoC"][N-1], U_end)
 
-    final_states.update({
-        "SoC_final": sol["SoC"][int(60/cf.interval)-1],
-        "TRCU_final": sol["TRCU"][int(60/cf.interval)-1],
-        "QRCU_final": sol["QRCU"][int(60/cf.interval)-1],
-        "PS1_final": sol["PS1"][int(60/cf.interval)-1],
-        "PS2_final": sol["PS2"][int(60/cf.interval)-1],
-    })
-
-    csv_path = "states.csv"
     csv_path_con = "stage2_hourly_results.csv"  # to store control actions
-    
-    N = int(60/cf.interval)
-    
+
     # data frame for 12 rows in 1 hour
     df_hour = pd.DataFrame(sol_hour)
-
-    # -- Convert first 12 steps of results into flat format --
-    flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
-    row_df = pd.DataFrame([final_states]).iloc[0]
     
-    # -------------------- Initialise CSV files if file doesnt exist --------------------
-    # Final states CSV (one row per hour) this stores system states
-    if not os.path.isfile(csv_path):
-        df = pd.DataFrame(None, index=range(cf.HOURS), columns=final_states.keys())
-        df.to_csv(csv_path, index=False)
-    else:
-        df = pd.read_csv(csv_path)
-    
-    # Final states
-    df.loc[mf.CURRENT_HOUR] = row_df
-    df.to_csv(csv_path, index=False)
-    
-    # Control actions CSV (multiple rows: 12 rows per hour), this store control inputs
+# Control actions CSV (multiple rows: 12 rows per hour), this store control inputs
     if not os.path.isfile(csv_path_con):
         #if file doesnt exist create new csv
         df_hour.to_csv(csv_path_con, index=False)
@@ -796,23 +759,14 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
     # ============================================================
     if "demand_stack" in plots:
         total_cool_kW = cool * 1e-3
-        plt.figure()
-        plt.stackplot(
+        ff.plot_timeseries_multi(
             t,
-            p_iw,        # Interactive load
-            p_bw1,       # Batch workload zone 1
-            p_bw2,       # Batch workload zone 2
-            total_cool_kW,  # Cooling
-            labels=["Interactive", "BW Zone 1", "BW Zone 2", "Cooling"],
-            alpha=0.8
+            [L_IWf, LBW1, LBW2, total_cool_kW],
+            ["Interactive", "BW Zone 1", "BW Zone 2", "Cooling"],
+            title="Demand Breakdown (stacked)",
+            ylabel="kW",
+            xlabel="5-min steps"
         )
-
-        plt.title("Demand Breakdown (stacked)")
-        plt.xlabel("5-min steps")
-        plt.ylabel("kW")
-        plt.legend(loc="upper left")
-        plt.tight_layout()
-        plt.show()
 
     # ============================================================
     # 3. SUPPLY VS DEMAND

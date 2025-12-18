@@ -1,6 +1,5 @@
 # %%
 # import the neccessary libraries
-from copyreg import pickle
 from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
@@ -219,17 +218,17 @@ def initialise():
     # === Discrete-time SS model ===
     sys_d = ss(A_d, B_d, C_d, D_d, Ts_hour)
 
-    # print("System defined and saved for Simulink.")
+    print("System defined and saved for Simulink.")
 
-    # # === Check system stability ===
-    # print("Eigenvalues of continuous system:", np.linalg.eigvals(A_c))
-    # print("Eigenvalues of discrete system:", np.linalg.eigvals(A_dis))
-    # print("Eigenvalues of augmented system:", np.linalg.eigvals(A_d))
+    # === Check system stability ===
+    print("Eigenvalues of continuous system:", np.linalg.eigvals(A_c))
+    print("Eigenvalues of discrete system:", np.linalg.eigvals(A_dis))
+    print("Eigenvalues of augmented system:", np.linalg.eigvals(A_d))
 
-    # if np.all(np.abs(np.linalg.eigvals(A_dis)) < 1):
-    #     print("The discrete-time system is stable.")
-    # else:
-    #     print("The discrete-time system is unstable.") 
+    if np.all(np.abs(np.linalg.eigvals(A_dis)) < 1):
+        print("The discrete-time system is stable.")
+    else:
+        print("The discrete-time system is unstable.") 
 
     # save matrix elements to text file
     np.savetxt('A_d_matrix.txt', A_d, fmt='%.6f')
@@ -333,9 +332,9 @@ def initialise():
     ttl_base = f"London — day {mf.CURRENT_DAY} from hour {mf.CURRENT_HOUR} for {length//24} days"
     t_hr  = np.arange(length)  
 
-    # print("len t_hr ",len(t_hr))
-    # print("len T_cell ",len(T_cell[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length]))
-    # print("length ",length)
+    print("len t_hr ",len(t_hr))
+    print("len T_cell ",len(T_cell[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length]))
+    print("length ",length)
 
 
     # import weather data from Open-Meteo through vpp ward package
@@ -483,6 +482,7 @@ def initialise():
     PS_0_arr = np.full(N,  cf.PS_0)  # initial server power for all servers
     U0 = np.concatenate([TRCU_0_arr, QRCU_0_arr, PS_0_arr])
 
+    global mode
         # Objective types: take users value to determine the types of objective function
     user_choice = input("Select objective type:\n0 - Single objective\n1 - Multi-objective with heat tracking penalty\nEnter 0 or 1: ")
     if user_choice == "0":
@@ -792,18 +792,25 @@ def main():
                                 sol["PS1"][hour],
                                 sol["PS2"][hour]])
     
-    # stage1_outputs = {
-    #     "mode": mode,
-    #     "A_5min": A_5min,
-    #     "B_5min": B_5min,
-    #     "p_buy": p_buy,
-    #     "p_sell": p_sell,
-    #     "p_gas": p_gas,
-    # }
 
-    # file_name = 'stage1_outputs.pkl'
-    # with open(file_name, 'wb') as file:
-    #     pickle.dump(stage1_outputs, file)   
+    # %%
+    # Save Stage-1 artifacts needed by Stage-2 (so Stage-2 can run without importing Stage-1)
+    # These are small and stable: mode, bounds, prices, and discrete thermal model matrices.
+    artifacts_path = "stage1_artifacts.npz"
+    try:
+        np.savez(
+            artifacts_path,
+            mode=np.array([mode], dtype=int),
+            L_max=np.array([L_max], dtype=float),
+            p_buy=np.array(p_buy, dtype=float),
+            p_sell=np.array(p_sell, dtype=float),
+            p_gas=np.array(p_gas, dtype=float),
+            A_5min=np.array(A_5min, dtype=float),
+            B_5min=np.array(B_5min, dtype=float),
+        )
+        print(f"Saved Stage-1 artifacts to {artifacts_path}")
+    except Exception as e:
+        print(f"WARNING: Failed to save Stage-1 artifacts ({artifacts_path}): {e}")
 
 
 # to execute main function when run python script directly
@@ -932,6 +939,7 @@ def plot():
     ff.plot_timeseries_multi(t, [acc_LBW, acc_sol_LBW], ["L_BW", "schl_LBW"], "Accumulated BW", ylabel="BW")
 
 
-# %% 
-# save variables for next stage
+# %%
+ 
+
 
