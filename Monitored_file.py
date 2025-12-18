@@ -26,7 +26,7 @@ CURRENT_INTERVAL = 10  # Example current interval index
 df = pd.read_csv("Example_datasets.csv")
 data_length = df.shape[0]
 
-print("Data length (number of rows):", data_length)
+# print("Data length (number of rows):", data_length)
 # Temperature data for 10 servers
 inlet_cols = [f"TI_{i}_C" for i in range(1, 11)]
 server_cols = [f"TS_{i}_C" for i in range(1, 11)]
@@ -45,12 +45,12 @@ SERVER_POWER = df[[f"PS_{i}_kW" for i in range(1, 11)]].values
 SERVER_POWER = SERVER_POWER*1000  # Convert kW to W
 
 # dimension of datas [rowxcolumn] = [Time(180), NUMBER_OF_SERVERS(10)]
-print("INLET_TEMPERATURE shape:", INLET_TEMPERATURE.shape)
-print("SERVER_TEMPERATURE shape:", SERVER_TEMPERATURE.shape)
-print("OUTLET_TEMPERATURE shape:", OUTLET_TEMPERATURE.shape)
-print("RCU_TEMPERATURE shape:", RCU_TEMPERATURE.shape)
-#print("RCU_AIRFLOW shape:", RCU_AIRFLOW.shape)
-print("SERVER_POWER shape:", SERVER_POWER.shape)
+# print("INLET_TEMPERATURE shape:", INLET_TEMPERATURE.shape)
+# print("SERVER_TEMPERATURE shape:", SERVER_TEMPERATURE.shape)
+# print("OUTLET_TEMPERATURE shape:", OUTLET_TEMPERATURE.shape)
+# print("RCU_TEMPERATURE shape:", RCU_TEMPERATURE.shape)
+## print("RCU_AIRFLOW shape:", RCU_AIRFLOW.shape)
+# print("SERVER_POWER shape:", SERVER_POWER.shape)
 
 # check if successful
 # print("Data loaded successfully")
@@ -72,17 +72,24 @@ for j in range(INLET_TEMPERATURE.shape[0]):  # Example time index for measuremen
         Xmeas[i + 20, j] = OUTLET_TEMPERATURE.T[i, j]  # TO
 
 # Check data shapes 
-print("INLET_TEMPERATURE shape:", INLET_TEMPERATURE.shape)  # Should be (T, NUMBER_OF_SERVERS)
-print("Xmeas shape:", Xmeas.shape)  # Should be (30,) for 10 servers at any time point
-print("INLET_TEMPERATURE.shape[0]",INLET_TEMPERATURE.shape[0])
+# print("INLET_TEMPERATURE shape:", INLET_TEMPERATURE.shape)  # Should be (T, NUMBER_OF_SERVERS)
+# print("Xmeas shape:", Xmeas.shape)  # Should be (30,) for 10 servers at any time point
+# print("INLET_TEMPERATURE.shape[0]",INLET_TEMPERATURE.shape[0])
 
 # Example of Interactive load (# number of request)
 L_DC = np.array([600,550,520,500,520,600,800,1000,1200,1300,1400,1500,
                  1500,1450,1400,1350,1300,1250,1200,1100,1000,900,800,700])
+# L_DC = L_DC * NUMBER_OF_SERVERS  # Total data center load for all servers
 
 L_IW = np.array([300,280,260,250,260,350,600,800,1000,1100,1150,1200,
                  1200,1150,1100,1000,900,800,700,600,500,400,350,320])
+# L_IW = L_IW * NUMBER_OF_SERVERS  # Total interactive workload for all servers
 
 # Example of interactive load with 5 minutes interval forecasting
 L_DC_5min = np.repeat(L_DC, cf.STEP) 
 L_IW_5min = np.repeat(L_IW, cf.STEP) 
+
+# Basic check
+Total_L_BW = np.sum(L_DC - L_IW)
+Avg_hourly_L_BW = Total_L_BW/cf.HOURS
+L_max = np.max(L_IW) + Avg_hourly_L_BW

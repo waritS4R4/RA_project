@@ -1,0 +1,20 @@
+\ Model Lower_Layer_Optimisation_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0x15506c9b6c81ee59
+Minimize
+ 
+Subject To
+ initial_states_X_1[3]: rack_1[3,0] = 3.07208827534414
+ initial_inputs_U_0[0]: U[0,0] = 1.75962e-05
+ initial_inputs_U_0[1]: U[1,0] = 0.0999999656293018
+ avg_TO_0: - 0.5 rack_1[2,0] - 0.5 rack_1[3,0] + Avg_TO[0] = 0
+ heat_balance_0: H_sub[0] + H_1[0] = 0
+ waste_heat_recovery_0: H_1[0] + [ 1206 U[0,0] * U[1,0]
+   - 1206 U[1,0] * Avg_TO[0] ] = 0
+Bounds
+ rack_1[3,0] free
+ U[0,0] free
+ U[1,0] free
+ H_1[0] free
+ Avg_TO[0] free
+End

@@ -27,10 +27,32 @@ import Monitored_file as mf
 # Use the same model from the dissertation ( equivalent 2 servers in a racks)
 # System's complete state-space model
 # Define constants (replace with actual values)
+
+# Objective types: take users value to determine the types of objective function
+global mode
+user_choice = input("Select objective type:\n0 - Single objective\n1 - Multi-objective with heat tracking penalty\nEnter 0 or 1: ")
+if user_choice == "0":
+    mode = 0  # Single objective
+    print(f"Objective type selected: Single objective")
+elif user_choice == "1":
+    mode = 1  # Multi-objective with heat tracking penalty
+    print(f"Objective type selected: Multi-objective")
+else:
+    print("Invalid choice, defaulting to single objective.")
+    mode = 0
+
+global options, T, delta_t
+options = {                 # Retrieve Gurobi licence
+    "WLSACCESSID": "ee9bea66-ab05-406d-91a7-20582d51dfd6",
+    "WLSSECRET": "5d1f81b2-4889-49d3-a1a2-796de424605a",
+    "LICENSEID": 2712303,
+}
+        
+
 def initialise():
     # global variables
-    global A, B, C, D, L_BW_0, L_max, P_solar, P_wind, heat_demand, p_buy, p_sell, p_gas, X0, U0
-    global A_5min, B_5min, C_5min, D_5min
+    global A, B, C, D
+    global A_5min, B_5min, C_5min, D_5min, Ts_hour, Ts_5min
 
     Ts_hour = 60*60;  # sampling time in 1 cf.HOURS 
     Ts_5min = 5*60; # sampling time of 5 min for second stage
@@ -238,10 +260,10 @@ def initialise():
     #     print("The discrete-time system is unstable.") 
 
     # save matrix elements to text file
-    np.savetxt('A_d_matrix.txt', A_d, fmt='%.6f')
-    np.savetxt('B_d_matrix.txt', B_d, fmt='%.6f')
-    np.savetxt('C_d_matrix.txt', C_d, fmt='%.6f')
-    np.savetxt('D_d_matrix.txt', D_d, fmt='%.6f')
+    # np.savetxt('A_d_matrix.txt', A_d, fmt='%.6f')
+    # np.savetxt('B_d_matrix.txt', B_d, fmt='%.6f')
+    # np.savetxt('C_d_matrix.txt', C_d, fmt='%.6f')
+    # np.savetxt('D_d_matrix.txt', D_d, fmt='%.6f')
 
     # export matrices
     np.savetxt('A_matrix.txt', A, fmt='%.6f')
@@ -249,62 +271,9 @@ def initialise():
     np.savetxt('C_matrix.txt', C, fmt='%.6f')
     np.savetxt('D_matrix.txt', D, fmt='%.6f')
 
-
-    # %%
-    # --- Build a step input sequence ---
-    Nsteps = 50                 # number of simulation steps
-    step_at = [5, 10, 15, 20, 25, 30]       # step time index
-    amp = 500                    # step amplitude (units of the chosen input)
-
-    m = B.shape[1]               # number of inputs
-
-    # initial inputs
-    Usim = np.zeros((m, Nsteps))
-    Usim[0, :] = cf.TRCU_0 # cosntant liquid temperature
-    Usim[1, :] = cf.QRCU_0 # constant liquid flows
-    # U[2, :] and U[3, :] are already zero
-
-    # Choose which input to step (0=Th, 1=Qh, 2=Ps1, 3=Ps2).
-    inp_idx = 2                  # increase server power consumption
-    for j in range (len(step_at)):
-        Usim[inp_idx, step_at[j]:] += amp
-        Usim[inp_idx + 1, step_at[j]:] += amp  # step both servers
-
-    # Nonzero initial state
-    x0 = [cf.TI_10, cf.TI_20, cf.TO_10, cf.TO_20]
-
-    # --- Run simulation ---------------
-    t, X, Y = ff.simulate_discrete_ss(A, B, C, D, Ts_hour, Usim, x0=x0)
-
-    # --- Plot states (temperatures) ---
-    plt.figure()
-    labels_x = ["Ti1", "Ti2", "To1", "To2"]
-    for i in range(X.shape[0]):
-        plt.plot(t, X[i, :], label=labels_x[i], linestyle=':' if (i==0 or i==2) else '-')
-    for i in range(len(step_at)):
-        plt.axvline(step_at[i] * Ts_hour/60, linestyle="--")  # show step time
-    plt.xlabel("Time [min]")
-    plt.ylabel("Temperature [°C]")
-    plt.title(f"State response to step in input u[{inp_idx}]")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-    # Plot outputs to see H, P, etc. ---
-    plt.figure()
-    for i in range(Y.shape[0]):
-        plt.plot(t, Y[i, :], label=f"y{i+1}")
-    for i in range(len(step_at)):
-        plt.axvline(step_at[i] * Ts_hour/60, linestyle="--")
-    plt.xlabel("Time [min]")
-    plt.ylabel("Outputs")
-    plt.title("Output response")
-    plt.legend(["Heat (W)", "Consumption (W)"])
-    plt.grid(True)
-    plt.show()
-
-
-    # %%
+    # import inputs 
+    global L_BW_0, L_max, P_solar, P_wind, heat_demand, p_buy, p_sell, p_gas, P_solar_days, T_cell, G, weather, wind_speeds
+    global P_BW, P_DC, P_IW
     #------------------------ Solar PV model--------------------------
     # estimate solar power generation using PVLib
     # Define location (London)
@@ -330,6 +299,86 @@ def initialise():
         T_cell[i] = ff.cell_temperature(air_temp[i], G[i], cf.T_NOCT, cf.G_NOCT)  # Cell temperature
         P_solar[i] = ff.pv_output(cf.ETA_INVT, cf.P_STC, G[i], cf.G_STC, cf.GAMMA, T_cell[i], cf.T_STC)
 
+    # Wind power
+    # import weather data from Open-Meteo through vpp ward package
+    weather = openmeteo(latitude='51.5074', longitude='-0.1278', start_date='2022-01-01', end_date='2022-12-31', fields=["temperature_2m", "windspeed_100m", "shortwave_radiation"])
+    wind_speeds = weather['windspeed_100m'].values # use data from open-meteo
+    P_wind = np.array([ff.wind_power_from_curve(v) for v in wind_speeds])
+
+    # ------------------------ Load heat data-----------------------
+    heat_demand_data = pd.read_csv('Renaldi_AppliedEnergy_Heat_Demand_Data.csv')
+    heat_demand = heat_demand_data['Heat demand (kW)'].values[:24]
+
+    # Price data for buying and selling electricity from a csv file
+    price_data = pd.read_csv('prices_data.csv')
+    p_buy  = price_data['elec_price'].values
+    p_sell = price_data['elec_price_sell'].values
+    p_gas  = price_data['gas_price'].values
+
+    # Example of computing load profile for dc power consumption and batch workload
+    L_BW_0 =  mf.L_DC - mf.L_IW  # exact batch workload at each time step
+    P_DC = ff.server_consumption(cf.c_pue, 1, mf.L_DC, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+    P_IW = ff.server_consumption(cf.c_pue, 1, mf.L_IW, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+    P_BW = ff.server_consumption(cf.c_pue, 1, L_BW_0, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
+
+
+
+    # %%
+def plot_step_response(mat_a, mat_b, mat_c, mat_d, Ts):
+    # --- Build a step input sequence ---
+    Nsteps = 50                 # number of simulation steps
+    step_at = [5, 10, 15, 20, 25, 30]       # step time index
+    amp = 500                    # step amplitude (units of the chosen input)
+
+    m = mat_b.shape[1]               # number of inputs
+
+    # initial inputs
+    Usim = np.zeros((m, Nsteps))
+    Usim[0, :] = cf.TRCU_0 # cosntant liquid temperature
+    Usim[1, :] = cf.QRCU_0 # constant liquid flows
+    # U[2, :] and U[3, :] are already zero
+
+    # Choose which input to step (0=Th, 1=Qh, 2=Ps1, 3=Ps2).
+    inp_idx = 2                  # increase server power consumption
+    for j in range (len(step_at)):
+        Usim[inp_idx, step_at[j]:] += amp
+        Usim[inp_idx + 1, step_at[j]:] += amp  # step both servers
+
+    # Nonzero initial state
+    x0 = [cf.TI_10, cf.TI_20, cf.TO_10, cf.TO_20]
+
+    # --- Run simulation ---------------
+    t, X, Y = ff.simulate_discrete_ss(mat_a, mat_b, mat_c, mat_d, Ts, Usim, x0=x0)
+
+    # --- Plot states (temperatures) ---
+    plt.figure()
+    labels_x = ["Ti1", "Ti2", "To1", "To2"]
+    for i in range(X.shape[0]):
+        plt.plot(t, X[i, :], label=labels_x[i], linestyle=':' if (i==0 or i==2) else '-')
+    for i in range(len(step_at)):
+        plt.axvline(step_at[i] * Ts/60, linestyle="--")  # show step time
+    plt.xlabel("Time [min]")
+    plt.ylabel("Temperature [°C]")
+    plt.title(f"State response to step in input u[{inp_idx}]")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Plot outputs to see H, P, etc. ---
+    plt.figure()
+    for i in range(Y.shape[0]):
+        plt.plot(t, Y[i, :], label=f"y{i+1}")
+    for i in range(len(step_at)):
+        plt.axvline(step_at[i] * Ts/60, linestyle="--")
+    plt.xlabel("Time [min]")
+    plt.ylabel("Outputs")
+    plt.title("Output response")
+    plt.legend(["Heat (W)", "Consumption (W)"])
+    plt.grid(True)
+    plt.show()
+
+    # %%
+def plot_inputs():
 
     # %%
     # Length of plotting data
@@ -342,11 +391,6 @@ def initialise():
     # print("len t_hr ",len(t_hr))
     # print("len T_cell ",len(T_cell[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length]))
     # print("length ",length)
-
-
-    # import weather data from Open-Meteo through vpp ward package
-    weather = openmeteo(latitude='51.5074', longitude='-0.1278', start_date='2022-01-01', end_date='2022-12-31', fields=["temperature_2m", "windspeed_100m", "shortwave_radiation"])
-
     # (1) Temperatures (two lines, one figure)
     ff.plot_timeseries_multi(
         t_hr, [weather['temperature_2m'][mf.CURRENT_HOUR:mf.CURRENT_HOUR+length], T_cell[0:length]], ["Ambient Temp (open meteo)", "T Cell Temp (solcast)"],
@@ -369,10 +413,8 @@ def initialise():
         ylabel="kW", xlabel="Hour"
     )
 
-    wind_speeds = weather['windspeed_100m'].values # use data from open-meteo
 
     # Plot wind power generation 
-    P_wind = np.array([ff.wind_power_from_curve(v) for v in wind_speeds])
     ff.plot_timeseries_multi(
         t_hr, [P_wind[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length],wind_speeds[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length]], ['Wind Power (kW)', 'Wind Speed (m/s)'],
         title=f"Estimated Wind Power Output {mf.CURRENT_DAY}th day from {mf.CURRENT_HOUR}th hour for {length//24} days",
@@ -383,24 +425,10 @@ def initialise():
     # %%
     #---------------------------Load simulation data---------------------------
     # Heat demand from neighbouring thermal users
-    heat_demand_data = pd.read_csv('Renaldi_AppliedEnergy_Heat_Demand_Data.csv')
-    heat_demand = heat_demand_data['Heat demand (kW)'].values[:24]
-
-    # Price data for buying and selling electricity from a csv file
-    price_data = pd.read_csv('prices_data.csv')
-    p_buy  = price_data['elec_price'].values
-    p_sell = price_data['elec_price_sell'].values
-    p_gas  = price_data['gas_price'].values
-
-    # Example of computing load profile for dc power consumption and batch workload
-    L_BW_0 =  mf.L_DC - mf.L_IW  # exact batch workload at each time step
-    P_DC = ff.server_consumption(cf.c_pue, 1, mf.L_DC, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
-    P_IW = ff.server_consumption(cf.c_pue, 1, mf.L_IW, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
-    P_BW = ff.server_consumption(cf.c_pue, 1, L_BW_0, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)
-
+   
     # Plots the inputs 
     fig, ax1 = plt.subplots(figsize=(10, 4))
-
+    
     # --- Primary y-axis ---
     ax1.plot(heat_demand, label='Heat Demand (kW)', color='tab:red')
     ax1.plot(P_solar[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length],
@@ -453,16 +481,7 @@ def initialise():
     # %%
     # Upper layer optimisation for day-ahead scheduling of data centre with solar and battery storage
     #------------------------ Gurobi Optimisation--------------------------
-    global options, T, delta_t, mode
-    options = {                 # Retrieve Gurobi licence
-        "WLSACCESSID": "ee9bea66-ab05-406d-91a7-20582d51dfd6",
-        "WLSSECRET": "5d1f81b2-4889-49d3-a1a2-796de424605a",
-        "LICENSEID": 2712303,
-    }
-        
-    # Data (arrays of length T)
-    T = len(p_buy)          # p_buy[t], p_sell[t]
-    delta_t = 60*60            # 1 hr interval for power cost because ( price is in $/kWh )
+   
 
     # Constraints:
     """constraints:
@@ -478,7 +497,15 @@ def initialise():
     assert (cf.Ps_max)*cf.HOURS >= np.sum(ff.server_consumption(cf.c_pue, 1, mf.L_DC, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)), "Server power max limit too low for the IW+BW workload"
 
 
-    # %%
+    
+
+def main():
+    # Declare waste heat variables
+    # avg_TO = 0; avg_TRCU = 0
+
+    # Data (arrays of length T)
+    delta_t = 60*60            # 1 hr interval for power cost because ( price is in $/kWh )
+
     # Initial conditions for each variables
     TI_0 = np.full(2,  cf.TI_10)   # initial inlet temp for all servers
     TO_0 = np.full(2,  cf.TO_10)   # initial outlet temp for all servers
@@ -486,24 +513,8 @@ def initialise():
 
     TRCU_0_arr = np.full(1,  cf.TRCU_0)  # initial cold air supply temperature for single RCU per rack
     QRCU_0_arr = np.full(1,  cf.QRCU_0)  # initial airflow for single RCU
-    PS_0_arr = np.full(N,  cf.PS_0)  # initial server power for all servers
+    PS_0_arr = np.full(cf.NUMBER_OF_SERVERS,  cf.PS_0)  # initial server power for all servers
     U0 = np.concatenate([TRCU_0_arr, QRCU_0_arr, PS_0_arr])
-
-        # Objective types: take users value to determine the types of objective function
-    user_choice = input("Select objective type:\n0 - Single objective\n1 - Multi-objective with heat tracking penalty\nEnter 0 or 1: ")
-    if user_choice == "0":
-        mode = 0  # Single objective
-        print(f"Objective type selected: Single objective")
-    elif user_choice == "1":
-        mode = 1  # Multi-objective with heat tracking penalty
-        print(f"Objective type selected: Multi-objective")
-    else:
-        print("Invalid choice, defaulting to single objective.")
-        mode = 0
-
-def main():
-    # Declare waste heat variables
-    # avg_TO = 0; avg_TRCU = 0
 
     # Decision vars
     # state variables
@@ -522,14 +533,14 @@ def main():
         # U = m.addMVar((2*cf.NUMBER_OF_SERVERS, cf.HOURS), lb=lb_U[:, None], ub=ub_U[:, None], name="U")  # Control variables
         U = m.addMVar((2*cf.NUMBER_OF_SERVERS, cf.HOURS), lb=np.tile(lb_U[:, None], (1, cf.HOURS)), ub=np.tile(ub_U[:, None], (1, cf.HOURS)), name="U")  # Control variables
 
-        L_BW = m.addMVar((cf.NUMBER_OF_SERVERS, cf.HOURS), lb=0, ub=L_max, name="L_BW")  # Data centre load
+        L_BW = m.addMVar((cf.NUMBER_OF_SERVERS, cf.HOURS), lb=0, ub=mf.L_max, name="L_BW")  # Data centre load
         A_DC = m.addMVar((cf.HOURS), lb=0, ub=10,     name="A_DC")  # number of active server
         L    = m.addVars(cf.HOURS, name="L")          # total load
         P_dc = m.addVars(cf.HOURS, name="P_dc")       # data centre power
         total_previous_LBW = m.addVars(cf.HOURS, name="previous_LBW")       # BW scheduled before time t
         
         SoC  = m.addMVar(cf.HOURS, lb=cf.SoC_min, ub=cf.SoC_max, name="SoC")   # Battery SoC
-        H_sub = m.addMVar(T, name="H_sub")  # Auxiliary, no explicit bounds
+        H_sub = m.addMVar(cf.HOURS, name="H_sub")  # Auxiliary, no explicit bounds
         H_1   = m.addMVar(cf.HOURS, lb=0, name="H_1")                          # Heat extracted 
 
         Pimp = m.addMVar(cf.HOURS,  lb=0, ub = cf.Pg_max, name="Pimp")  # Grid import (≥0)
@@ -583,11 +594,11 @@ def main():
             m.addConstr(avg_TO[t] == (X_1[2, t] + X_1[3, t]) / cf.NUMBER_OF_SERVERS, name=f"avg_TO_{t}")
 
             # Original H
-            m.addConstr(H_1[t] == RHO_A * CP_A * U[1,t] * (avg_TO[t] - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
+            m.addConstr(H_1[t] == cf.RHO_A * cf.CP_A * U[1,t] * (avg_TO[t] - U[0,t]), name=f"waste_heat_recovery_{t}")  # Waste heat recovery
 
             # Cooling power based on COP
-            m.addConstr(P_source[t] == H_1[t] / COP_C, name=f"cooling_power_{t}")  
-            m.addConstr(P_fan[t] == beta_0 + beta_1*U[1, t] + beta_2*U[1, t]**2, name=f"fan_power_{t}")
+            m.addConstr(P_source[t] == H_1[t] / cf.COP_C, name=f"cooling_power_{t}")  
+            m.addConstr(P_fan[t] == cf.BETA_0 + cf.BETA_1*U[1, t] + cf.BETA_2*U[1, t]**2, name=f"fan_power_{t}")
             m.addConstr(P_cooling[t] == P_source[t] + P_fan[t], name=f"total_cooling_power_{t}")
     
 
@@ -604,11 +615,11 @@ def main():
 
             # Server power consumption constraints based on current load and cooling conditions
             m.addConstr(
-                U[2, t-1] == ff.server_consumption(1.5, A_DC[t-1], L_BW[0, t]+mf.L_IW[t-1]/2, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)*1000, name=f"PS1_{t}" # convert to W
+                U[2, t-1] == ff.server_consumption(1.5, A_DC[t-1], L_BW[0, t]+mf.L_IW[t-1]/2, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)*1e3, name=f"PS1_{t}" # convert to W
             )
 
             m.addConstr(
-                U[3, t-1] == ff.server_consumption(1.5, A_DC[t-1], L_BW[1, t]+mf.L_IW[t-1]/2, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)*1000, name=f"PS2_{t}" # convert to W
+                U[3, t-1] == ff.server_consumption(1.5, A_DC[t-1], L_BW[1, t]+mf.L_IW[t-1]/2, cf.L_RATE, cf.P_IDLE, cf.P_PEAK)*1e3, name=f"PS2_{t}" # convert to W
             )
 
             m.addConstr(
@@ -648,7 +659,9 @@ def main():
             )
 
             # Heat balance
-            m.addConstr(H_sub[t] == heat_demand[t]*1e3 - H_1[t], name=f"heat_balance_{t}")   # here H_saub is in kW
+            m.addConstr(H_sub[t] >= 0, name=f"Hsub_nonneg_{t}")
+            m.addConstr(H_sub[t] >= heat_demand[t]*1e3 - H_1[t], name=f"heat_balance_{t}")
+
             
         # Declare objective function
         obj = 0
