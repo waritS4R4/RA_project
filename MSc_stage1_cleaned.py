@@ -242,7 +242,7 @@ def initialise():
 
     # === Save to file ===
     from scipy.io import savemat
-    savemat('data_center_ss_matrices.mat', {'A_d': A_d, 'B_d': B_d, 'C_d': C_d, 'D_d': D_d})
+    savemat('matrices/data_center_ss_matrices.mat', {'A_d': A_d, 'B_d': B_d, 'C_d': C_d, 'D_d': D_d})
 
     # === Discrete-time SS model ===
     sys_d = ss(A_d, B_d, C_d, D_d, Ts_hour)
