@@ -1,7 +1,7 @@
 # This is the files for functions used in the simulation
 import numpy as np
 import matplotlib.pyplot as plt
-import constant_file as cf
+import python_code.constants_file as cf
 
 
 

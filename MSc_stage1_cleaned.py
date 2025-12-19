@@ -13,9 +13,9 @@ from control import ss, c2d
 from vpp_ward import openmeteo, renewable_assets
 
 # import constants
-import functions as ff
-import constant_file as cf
-import Monitored_file as mf
+import python_code.functions_file as ff
+import python_code.constants_file as cf
+import python_code.monitored_file as mf
 
 
 # %%
@@ -266,14 +266,15 @@ def initialise():
     # np.savetxt('D_d_matrix.txt', D_d, fmt='%.6f')
 
     # export matrices
-    np.savetxt('A_matrix.txt', A, fmt='%.6f')
-    np.savetxt('B_matrix.txt', B, fmt='%.6f')
-    np.savetxt('C_matrix.txt', C, fmt='%.6f')
-    np.savetxt('D_matrix.txt', D, fmt='%.6f')
+    np.savetxt('matrices/A_matrix.txt', A, fmt='%.6f')
+    np.savetxt('matrices/B_matrix.txt', B, fmt='%.6f')
+    np.savetxt('matrices/C_matrix.txt', C, fmt='%.6f')
+    np.savetxt('matrices/D_matrix.txt', D, fmt='%.6f')
 
     # import inputs 
     global L_BW_0, L_max, P_solar, P_wind, heat_demand, p_buy, p_sell, p_gas, P_solar_days, T_cell, G, weather, wind_speeds
     global P_BW, P_DC, P_IW
+    
     #------------------------ Solar PV model--------------------------
     # estimate solar power generation using PVLib
     # Define location (London)
@@ -287,7 +288,7 @@ def initialise():
     times = pd.date_range('2022-01-01', '2022-12-31 23:00', freq='1H', tz=tz)     # Time range 
     cs = site.get_clearsky(times, model='ineichen')                               # Get clear-sky irradiance (Ineichen model)
     # G = cs['ghi'].values                                                 # GHI in W/m^2 for 1 day and 1 hour interval
-    df_gen1hr = pd.read_csv('ghi_1hr_1jan2022.csv') # read ghi data from solcast
+    df_gen1hr = pd.read_csv('input_data/ghi_1hr_1jan2022.csv') # read ghi data from solcast
     G = df_gen1hr['ghi'].values
     air_temp = df_gen1hr['air_temp'].values
 
@@ -306,11 +307,11 @@ def initialise():
     P_wind = np.array([ff.wind_power_from_curve(v) for v in wind_speeds])
 
     # ------------------------ Load heat data-----------------------
-    heat_demand_data = pd.read_csv('Renaldi_AppliedEnergy_Heat_Demand_Data.csv')
+    heat_demand_data = pd.read_csv('input_data/Renaldi_AppliedEnergy_Heat_Demand_Data.csv')
     heat_demand = heat_demand_data['Heat demand (kW)'].values[:24]
 
     # Price data for buying and selling electricity from a csv file
-    price_data = pd.read_csv('prices_data.csv')
+    price_data = pd.read_csv('input_data/prices_data.csv')
     p_buy  = price_data['elec_price'].values
     p_sell = price_data['elec_price_sell'].values
     p_gas  = price_data['gas_price'].values
@@ -475,7 +476,7 @@ def plot_inputs():
         'Wind_Power_kW': P_wind[mf.CURRENT_HOUR:mf.CURRENT_HOUR+length],
         'Heat_Demand_kW': heat_demand  # original heat demand data
     })
-    generation_data.to_csv('generation_and_heat_demand_data.csv', index=False)  
+    generation_data.to_csv('input_data/generation_and_heat_demand_data.csv', index=False)  
 
 
     # %%
@@ -682,8 +683,8 @@ def main():
             m.computeIIS()
 
             # Write files you can open in a text editor
-            m.write("model_stg1.lp")      # full model in LP format
-            m.write("infeasible_stg1.ilp")  # IIS in ILP format (minimal conflicting set)
+            m.write("optimisation_log/model_stg1.lp")      # full model in LP format
+            m.write("optimisation_log/infeasible_stg1.ilp")  # IIS in ILP format (minimal conflicting set)
 
             # List constraints and variable bounds that participate in the IIS
             for c in m.getConstrs():
@@ -772,7 +773,7 @@ def main():
 
     if mode == 0:
         #write to single objective csv
-        with open('schedule_single_objective.csv', mode='w', newline='') as file:
+        with open('results/schedule_single_objective.csv', mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Hour', 'Pimp (kW)', 'Pexp (kW)', 'SoC', 'Batch Workload Zone 1', 'Batch Workload Zone 2', 'Active Servers', 'Heat Recovered (kWth)', 'Pch (kW)', 'Pdis (kW)', 'TRCU (C)', 'QRCU (m3/s)', 'PS1 (W)', 'PS2 (W)'])
             for hour in range(cf.HOURS):
@@ -793,7 +794,7 @@ def main():
                 
     elif mode == 1:
         #write to multi-objective csv
-        with open('schedule_multi_objective.csv', mode='w', newline='') as file:
+        with open('results/schedule_multi_objective.csv', mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Hour', 'Pimp (kW)', 'Pexp (kW)', 'SoC', 'Batch Workload Zone 1', 'Batch Workload Zone 2', 'Active Servers', 'Heat Recovered (kWth)', 'Pch (kW)', 'Pdis (kW)', 'TRCU (C)', 'QRCU (m3/s)', 'PS1 (W)', 'PS2 (W)'])
             for hour in range(cf.HOURS):
@@ -870,7 +871,7 @@ def plot():
 
     # %%
     # total computing load
-    from functions import QoS_function
+    from python_code.functions_file import QoS_function
 
     total_load = np.sum(sol["L_BW"], axis=0) + mf.L_IW[:cf.HOURS]
     ff.plot_timeseries_multi(t, [sol["L_BW"][0].T, sol["L_BW"][1].T], ["Batch Workload Zone 1", "Batch Workload Zone 2"], "Batch Workload Dynamic", ylabel="Requests per hour")

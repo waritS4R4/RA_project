@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import os
 
 # import all the neccessary dependencies
-import functions as ff
-import constant_file as cf
+import python_code.functions_file as ff
+import python_code.constants_file as cf
 import Monitored_file as mf # L_DC, L_IW, CURRENT_HOUR
 from Monitored_file import L_DC, L_IW
 import MSc_stage1_cleaned as stg1

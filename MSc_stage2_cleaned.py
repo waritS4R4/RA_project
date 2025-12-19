@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 import os
 
 # import all the neccessary dependencies
-import functions as ff
-import constant_file as cf
-import Monitored_file as mf # L_DC, L_IW, CURRENT_HOUR
-from Monitored_file import L_DC, L_IW
+import python_code.functions_file as ff
+import python_code.constants_file as cf
+import python_code.monitored_file as mf # L_DC, L_IW, CURRENT_HOUR
+from python_code.monitored_file import L_DC, L_IW
 import MSc_stage1_cleaned as stg1
 
 
@@ -29,14 +29,14 @@ def initialise(h):
 
     # Load the optimal schedule based on the selected mode extracted from the 
     if stg1.mode == 0:
-        optimal_schedule = pd.read_csv('schedule_single_objective.csv')
+        optimal_schedule = pd.read_csv('results/schedule_single_objective.csv')
     elif stg1.mode == 1:
-        optimal_schedule = pd.read_csv('schedule_multi_objective.csv')
+        optimal_schedule = pd.read_csv('results/schedule_multi_objective.csv')
     else:
         raise ValueError("Invalid mode selected.")
             
     # import the hourly solar, wind and heat from stage 1
-    df_gen = pd.read_csv('generation_and_heat_demand_data.csv')
+    df_gen = pd.read_csv('input_data/generation_and_heat_demand_data.csv')
     P_solar = df_gen['Solar_Power_kW'].values
     P_wind = df_gen['Wind_Power_kW'].values
     heat_demand = df_gen['Heat_Demand_kW'].values
@@ -51,8 +51,8 @@ def initialise(h):
     # 5 minutes solar generation forecast 
     P_solar_5min = np.repeat(P_solar[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
     # import 5 minute forecaste from solcast
-    ghi_5min_forecast = pd.read_csv('ghi_5mins_1jan2022.csv')['ghi'].values
-    temp_5min_forecast = pd.read_csv('ghi_5mins_1jan2022.csv')['air_temp'].values
+    ghi_5min_forecast = pd.read_csv('input_data/ghi_5mins_1jan2022.csv')['ghi'].values
+    temp_5min_forecast = pd.read_csv('input_data/ghi_5mins_1jan2022.csv')['air_temp'].values
 
     # calculate solar output 5 minutes
     T_cell = np.zeros(len(ghi_5min_forecast))
@@ -65,27 +65,25 @@ def initialise(h):
 
     # 5 minutes wind generation forecast
     P_wind_5min = np.repeat(P_wind[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
-    P_wind_5min_forecast = P_wind_5min + P_wind_5min*pd.read_csv('noise_patterns_5min.csv')['wind_noise'][:len(P_wind_5min)]   # adding 10% noise
+    P_wind_5min_forecast = P_wind_5min + P_wind_5min*pd.read_csv('input_data/noise_patterns_5min.csv')['wind_noise'][:len(P_wind_5min)]   # adding 10% noise
 
     # 5 minutes heat demand forecast
     heat_demand_5min = np.repeat(heat_demand[i:i+cf.horizon], 12)  # 12 intervals of 5 minutes in an hour
-    heat_demand_5min_forecast = heat_demand_5min + heat_demand_5min*pd.read_csv('noise_patterns_5min.csv')['heat_noise'][:len(heat_demand_5min)]   # adding 5% noise
-
+    heat_demand_5min_forecast = heat_demand_5min + heat_demand_5min*pd.read_csv('input_data/noise_patterns_5min.csv')['heat_noise'][:len(heat_demand_5min)]   # adding 5% noise
     # computing load noise
     # Breakdown of hourly workload into 5-minute intervals
     L_DC_5min = np.repeat(L_DC[i:i+cf.horizon]/(60/cf.interval), int(60/cf.interval))
     # L_DC_5min = np.repeat(L_DC/(60/cf.interval), int(60/cf.interval))  # Repeat each hourly value 12 times to create 5-minute intervals
-    L_DC_5min_forecast = L_DC_5min + L_DC_5min*pd.read_csv('noise_patterns_5min.csv')['interactive_workload_noise'][:len(L_DC_5min)]   # adding 10% noise
+    L_DC_5min_forecast = L_DC_5min + L_DC_5min*pd.read_csv('input_data/noise_patterns_5min.csv')['interactive_workload_noise'][:len(L_DC_5min)]   # adding 10% noise
 
     L_IW_5min = np.repeat(L_IW[i:i+cf.horizon]/(60/cf.interval), int(60/cf.interval))
     # L_IW_5min = np.repeat(L_IW/(60/cf.interval), int(60/cf.interval))  # Repeat each hourly value 12 times to create 5-minute intervals
-    L_IW_5min_forecast = L_IW_5min + L_IW_5min*pd.read_csv('noise_patterns_5min.csv')['interactive_workload_noise'][:len(L_IW_5min)]   # adding 10% noise
-
+    L_IW_5min_forecast = L_IW_5min + L_IW_5min*pd.read_csv('input_data/noise_patterns_5min.csv')['interactive_workload_noise'][:len(L_IW_5min)]   # adding 10% noise
     # Arriving batch load at each interval
     L_BW_0_5min_forecast = (L_DC_5min_forecast - L_IW_5min_forecast) # exact batch workload at each time step
 
     # electricity and gas prices
-    price_data = pd.read_csv('prices_data.csv')
+    price_data = pd.read_csv('input_data/prices_data.csv')
     p_buy  = price_data['elec_price'].values
     p_sell = price_data['elec_price_sell'].values
     p_gas  = price_data['gas_price'].values
@@ -109,7 +107,7 @@ def initialise(h):
 
     df_row = pd.DataFrame(hourly_forecast)
 
-    csv_path = "hour_forecasts.csv"
+    csv_path = "results/hour_forecasts.csv"
 
     if os.path.isfile(csv_path):
         df = pd.read_csv(csv_path)
@@ -251,7 +249,7 @@ def main():
 
     # if not the first hour
     elif mf.CURRENT_HOUR > 0:
-        final_states = pd.read_csv('states.csv')
+        final_states = pd.read_csv('results/states.csv')
         # select the row to initialise (usually the last completed hour)
         row = final_states.loc[final_states["hour"] == mf.CURRENT_HOUR-1].iloc[0]
 
@@ -483,8 +481,8 @@ def main():
             m.computeIIS()
 
             # Write files you can open in a text editor
-            m.write("model_stg2.lp")      # full model in LP format
-            m.write("infeasible_stg2.ilp")  # IIS in ILP format (minimal conflicting set)
+            m.write("optimisation_log/model_stg2.lp")      # full model in LP format
+            m.write("optimisation_log/infeasible_stg2.ilp")  # IIS in ILP format (minimal conflicting set)
 
             # List constraints and variable bounds that participate in the IIS
             for c in m.getConstrs():
@@ -604,7 +602,7 @@ def main():
         final_states[f"To_{i+1}_final"] = float(To_final[i])
 
     # save states
-    csv_path = "states.csv"
+    csv_path = "results/states.csv"
     row_df = pd.DataFrame([final_states]).iloc[0]
     
     # -------------------- Initialise CSV files if file doesnt exist --------------------
@@ -618,7 +616,7 @@ def main():
         df.to_csv(csv_path, index=False)
 
     # save control actions
-    csv_path_con = "stage2_hourly_results.csv"  # to store control actions
+    csv_path_con = "results/stage2_hourly_results.csv"  # to store control actions
     df_hour = pd.DataFrame(sol_hour)
     flat_row = {key: sol_hour[key].tolist() for key in sol_hour}
 
@@ -699,7 +697,7 @@ def iterate():
 
 # %%
 
-def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
+def plot_results(name, hours=None, plots="all"):
     """
     Stage-2 plotting function using ff.plot_timeseries_multi for all figures.
     Automatically adjusts x-axis depending on how many hours are selected.
@@ -759,7 +757,7 @@ def plot_results(name="stage2_hourly_results.csv", hours=None, plots="all"):
     # ----------------------------
     # FORECASTS
     # ----------------------------
-    df_f = pd.read_csv("hour_forecasts.csv")
+    df_f = pd.read_csv("results/hour_forecasts.csv")
     df_f = df_f[df_f["interval"].isin(intervals)].reset_index(drop=True)
 
     solar = df_f["P_solar_forecast"].to_numpy()

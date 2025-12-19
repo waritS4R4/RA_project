@@ -13,8 +13,8 @@ from control import ss, c2d
 from vpp_ward import openmeteo, renewable_assets
 
 # import constants
-import functions as ff
-import constant_file as cf
+import python_code.functions_file as ff
+import python_code.constants_file as cf
 import Monitored_file as mf
 
 
@@ -870,7 +870,7 @@ def plot():
 
     # %%
     # total computing load
-    from functions import QoS_function
+    from python_code.functions_file import QoS_function
 
     total_load = np.sum(sol["L_BW"], axis=0) + mf.L_IW[:cf.HOURS]
     ff.plot_timeseries_multi(t, [sol["L_BW"][0].T, sol["L_BW"][1].T], ["Batch Workload Zone 1", "Batch Workload Zone 2"], "Batch Workload Dynamic", ylabel="Requests per hour")

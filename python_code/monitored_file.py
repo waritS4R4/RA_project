@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from constant_file import NUMBER_OF_SERVERS
-import constant_file as cf
+from python_code.constants_file import NUMBER_OF_SERVERS
+import python_code.constants_file as cf
 
 # Measured time stamp
 T = 1*60                 # Number of measurement points over the entire period (1 minute sampling for 1 hours)
@@ -23,7 +23,7 @@ CURRENT_INTERVAL = 10  # Example current interval index
 
 # Import the datasets 
 # Load the CSV file into a DataFrame
-df = pd.read_csv("Example_datasets.csv")
+df = pd.read_csv("input_data/Example_datasets.csv")
 data_length = df.shape[0]
 
 # print("Data length (number of rows):", data_length)
