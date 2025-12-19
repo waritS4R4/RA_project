@@ -1,0 +1,112 @@
+Metadata-Version: 2.4
+Name: vpp_ward
+Version: 0.1.1
+Summary: Integration tools for integration tools for Virtual Power Plant modelling
+Author-email: Peter McCallum <peter.mccallum@ed.ac.uk>
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: openmeteo_requests==1.7.0
+Requires-Dist: pandas==2.3.1
+Requires-Dist: Requests==2.32.4
+Requires-Dist: requests_cache==1.2.1
+Requires-Dist: retry_requests==2.0.0
+Dynamic: license-file
+
+# `vpp_ward`
+
+Integration tools for integration tools for Virtual Power Plant modelling.
+
+
+## Installation
+
+### Standard Python installation
+
+To install `vpp_ward` in your local environment, use the following command in your terminal (using, if you prefer, a virtial environment):
+
+```
+pip install vpp_ward
+pip install plotly
+```
+
+### On-the-fly installation in a hosted Jupyter Lab instance:
+
+If you want to install `vpp_ward` directly from a running Jupyter-style notebook, include the following one-time command at the top of your notebook:
+
+```
+!pip install vpp_ward
+!pip install plotly
+```
+
+
+## Usage
+
+To import and use the library, include the following in your Python code:
+
+```
+from vpp_ward import openmeteo, renewable_assets
+```
+
+## APIs and wrappers
+
+### Openmeteo
+
+The public Open-Meteo API (Credit: https://open-meteo.com/en/docs/historical-weather-api) can be accessed via the wrapper function `vpp_ward.openmeteo`. This provides hourly weather data, at chosen latitude/longitude points, across specific user-specified date ranges. You can use this function to access a wide range of weather data directly within your Python code. The wrapper function manages your weather data request arguments, and makes the API call from your system. The API provider (by others) does not strictly require an API Key at present. API calls do have limits, and <mark>**their free-teir API (as used by this wrapper) IS NOT FOR COMMERCIAL USE**</mark>. See https://open-meteo.com/en/pricing for more details.
+
+
+The following weather parameters are available from this API (by others):
+
+- Temperature (2 m)
+- Relative Humidity (2 m)
+- Dewpoint (2 m)
+- Apparent Temperature
+- Precipitation (rain + snow)
+- Rain
+- Snowfall
+- Snow depth
+- Weather code
+- Sealevel Pressure
+- Surface Pressure
+- Cloud cover Total
+- Cloud cover Low
+- Cloud cover Mid
+- Cloud cover High
+- Reference Evapotranspiration (ET₀)
+- Vapour Pressure Deficit
+- Wind Speed (10 m)
+- Wind Speed (100 m)
+- Wind Direction (10 m)
+- Wind Direction (100 m)
+- Wind Gusts (10 m)
+- Soil Temperature (0-7 cm)
+- Soil Temperature (7-28 cm)
+- Soil Temperature (28-100 cm)
+- Soil Temperature (100-255 cm)
+- Soil Moisture (0-7 cm)
+- Soil Moisture (7-28 cm)
+- Soil Moisture (28-100 cm)
+- Soil Moisture (100-255 cm)
+
+    
+To see how this API works, visit: https://open-meteo.com/en/docs/historical-weather-api, and enter lat/lon etc. Scroll down to "API Response > Charts and URL", refresh chart. The code used in this wrapper function originates from the code provided in the adjacent "Python" tab. 
+
+#### Example usage:
+
+As a convenient alternative to the code provided at https://open-meteo.com/en/docs/historical-weather-api, the present wrapper function can be called follows:
+
+```
+weather = openmeteo(latitude='55', longitude='-3', start_date='2025-08-01', end_date='2025-08-08', fields=["temperature_2m"])
+```
+
+### Extracts fromr UK Government's "Renewable Energy Planning Database (REPD)"
+
+A wrapper function is provided as part of `vpp_ward` to support access to an API (hosted by the current developers: https://energymodels.eng.ed.ac.uk/dres/apis_renewables) that provides data on renewable energy installtion sites throughout the UK. The data that the external API serves originates from the UK Government's Renewable Eenrgy Planning Database (REPD), and is accordingly not the property of the developers (of this package, or the API endpoint).
+
+
+#### Example usage:
+
+As a convenient alternative to the code provided at https://energymodels.eng.ed.ac.uk/dres/apis_renewables, the present wrapper function can be called follows:
+
+```
+renewables = renewable_assets(county="Orkney", type="wind")
+```
