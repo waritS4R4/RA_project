@@ -639,7 +639,7 @@ def main():
 
 
 #%% Supply and demand 
-def plot():
+def plot_input():
     supply = P_solar_5min_forecast[0:cf.STEP] + P_wind_5min_forecast[0:cf.STEP] + sol["Pdis"]  + sol["Pimp"]
 
     demand = ff.server_consumption(1.5, sol["A_DC"], np.sum(sol["L_BW"], axis=0), cf.L_RATE, cf.P_IDLE, cf.P_PEAK) \
@@ -697,7 +697,7 @@ def iterate():
 
 # %%
 
-def plot_results(name, hours=None, plots="all"):
+def plot_result(name, hours=None, plots="all"):
     """
     Stage-2 plotting function using ff.plot_timeseries_multi for all figures.
     Automatically adjusts x-axis depending on how many hours are selected.

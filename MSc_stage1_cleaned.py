@@ -379,7 +379,7 @@ def plot_step_response(mat_a, mat_b, mat_c, mat_d, Ts):
     plt.show()
 
     # %%
-def plot_inputs():
+def plot_input():
 
     # %%
     # Length of plotting data
@@ -823,7 +823,7 @@ if __name__ == "__main__":
 # !jupyter nbconvert --to script MSc_2_servers_stage_1.ipynb
 
 #%% Plots
-def plot():
+def plot_result():
     # import numpy as np
     # import matplotlib.pyplot as plt
 
