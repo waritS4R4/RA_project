@@ -43,11 +43,10 @@ else:
 
 global options, T, delta_t
 options = {                 # Retrieve Gurobi licence
-    "WLSACCESSID": "ee9bea66-ab05-406d-91a7-20582d51dfd6",
-    "WLSSECRET": "5d1f81b2-4889-49d3-a1a2-796de424605a",
+    "WLSACCESSID": "f5965507-06da-4b97-86e2-63c808b4f0cb",
+    "WLSSECRET": "41948e1f-c80c-470d-a147-b7ccb0ebbcbd",
     "LICENSEID": 2712303,
 }
-        
 
 def initialise():
     # global variables

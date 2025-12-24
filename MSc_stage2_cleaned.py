@@ -339,8 +339,11 @@ def main():
                     - quicksum(L_BW[j,t] for j in range(cf.NUMBER_OF_SERVERS))
             )
 
-        # hard end-of-period
-        m.addConstr(B[cf.STEP-1] == 0)
+        quarter = cf.STEP // cf.horizon    
+        end_of_hour = [quarter-1, 2*quarter-1, 3*quarter-1, cf.STEP-1]
+
+        for k in end_of_hour:
+            m.addConstr(B[k] == 0, name=f"backlog_zero_at_{k}")
 
         # constraints for final value of SoC to be equal to initial value
         m.addConstr(SoC[cf.STEP-1] == SoC_0, name="final_SoC_equals_initial")
@@ -522,6 +525,7 @@ def main():
             "SoC":   SoC.X.copy(),
             "L_BW":  L_BW.X.copy(),
             "A_DC":  A_DC.X.copy(),
+            "B":     B.X.copy(),
             "Pch":   Pch.X.copy(),
             "Pdis":  Pdis.X.copy(),
             "P_source": P_source.X.copy(),
@@ -549,6 +553,7 @@ def main():
             "L_BW1": sol["L_BW"][0, :N],
             "L_BW2": sol["L_BW"][1, :N],
             "A_DC":  sol["A_DC"][:N],
+            "B":     sol["B"][:N],
             "Pch":   sol["Pch"][:N],
             "Pdis":  sol["Pdis"][:N],
             "P_source": sol["P_source"][:N],
